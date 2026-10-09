@@ -19,6 +19,8 @@ object Repo {
         var questions: List<QA>? = null,
     )
 
+    var localOn = false
+
     suspend fun boot() {
         if (sciences != null) return
         sciences = Api.decode<Rows<Science>>(Api.getJson("/data/sciences.json")).rows
@@ -26,6 +28,19 @@ object Repo {
         videos = Api.decode<Rows<Video>>(Api.getJson("/data/tube/videos.json")).rows
         persons = Api.decode<Rows<Person>>(Api.getJson("/data/persons.json")).rows
         works = Api.decode<Rows<Work>>(Api.getJson("/data/works.json")).rows
+        mergeLocal()
+    }
+
+    /** دمج المكتبة المحلية (ملفات الهاتف) مع كتالوج إرث — تُستدعى بعد كل استيراد. */
+    fun mergeLocal() {
+        val ls = LocalLib.localSeries()
+        val lv = LocalLib.localVideos()
+        localOn = ls.isNotEmpty()
+        series = (series ?: emptyList()) + ls
+        videos = (videos ?: emptyList()) + lv
+        LocalLib.localScience()?.let { s ->
+            if (sciences?.none { it.id == s.id } == true) sciences = sciences!! + s
+        }
     }
 
     fun video(id: String): Video? = videos?.firstOrNull { it.id == id }
@@ -33,6 +48,7 @@ object Repo {
     fun person(id: String): Person? = persons?.firstOrNull { it.id == id }
     fun work(id: String): Work? = works?.firstOrNull { it.id == id }
     fun seriesOfScience(sid: String): List<Series> = series?.filter { it.science == sid } ?: emptyList()
+    fun seriesOfVideo(vid: String): Series? = series?.firstOrNull { it.items.contains(vid) }
     fun worksOfScience(sid: String): List<Work> = works?.filter { it.science == sid } ?: emptyList()
     fun personName(id: String): String = person(id)?.short ?: person(id)?.name ?: id
 
@@ -41,7 +57,10 @@ object Repo {
     suspend fun align(id: String): List<AWord> {
         val l = lesson(id)
         if (l.align == null) {
-            runCatching { l.align = parseAlign(Api.getJson("/content/tube/$id/align.json")) }
+            LocalLib.alignEl(id)?.let { runCatching { l.align = parseAlign(it) } }
+            if (l.align == null) {
+                runCatching { l.align = parseAlign(Api.getJson("/content/tube/$id/align.json")) }
+            }
             if (l.align == null) l.align = emptyList()
         }
         return l.align!!
@@ -49,7 +68,8 @@ object Repo {
 
     suspend fun transcript(id: String): String {
         val l = lesson(id)
-        if (l.transcript == null) l.transcript = runCatching { Api.getText("/content/tube/$id/transcript.txt") }.getOrDefault("")
+        if (l.transcript == null) l.transcript = LocalLib.transcript(id)
+            ?: runCatching { Api.getText("/content/tube/$id/transcript.txt") }.getOrDefault("")
         return l.transcript!!
     }
 
@@ -57,7 +77,7 @@ object Repo {
         val l = lesson(id)
         if (l.summary == null) {
             runCatching {
-                val o = Api.getJson("/content/tube/$id/summary.json").jsonObject
+                val o = LocalLib.summaryEl(id)?.jsonObject ?: Api.getJson("/content/tube/$id/summary.json").jsonObject
                 l.summary = Api.decode<Summary>(o)
             }
         }
@@ -68,7 +88,8 @@ object Repo {
         val l = lesson(id)
         if (l.questions == null) {
             l.questions = runCatching {
-                Api.decode<Questions>(Api.getJson("/content/tube/$id/questions.json")).questions
+                val el = LocalLib.questionsEl(id) ?: Api.getJson("/content/tube/$id/questions.json")
+                Api.decode<Questions>(el).questions
             }.getOrDefault(emptyList())
         }
         return l.questions!!

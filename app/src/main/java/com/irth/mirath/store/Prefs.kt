@@ -70,4 +70,12 @@ object Prefs {
 
     fun finished(id: String, duration: Int): Boolean =
         duration > 0 && progress(id) >= duration * 0.95
+
+    /** مصدر تشغيل السلسلة: "yt" يوتيوب (افتراضي) أو "local" وسائط منزّلة. */
+    fun src(seriesId: String): String = sp?.getString("src.$seriesId", "yt") ?: "yt"
+    fun setSrc(seriesId: String, v: String) {
+        sp?.edit()?.putString("src.$seriesId", v)?.apply()
+        srcRev.value++
+    }
+    val srcRev = mutableStateOf(0)
 }

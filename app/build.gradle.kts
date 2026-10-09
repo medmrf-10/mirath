@@ -13,8 +13,8 @@ android {
         applicationId = "com.irth.mirath"
         minSdk = 24
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 5
+        versionName = "1.4"
     }
 
     buildTypes {
@@ -45,5 +45,6 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("androidx.documentfile:documentfile:1.0.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

@@ -29,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.irth.mirath.data.LocalLib
 import com.irth.mirath.data.Repo
 import com.irth.mirath.store.Prefs
 import com.irth.mirath.ui.theme.Pal
@@ -150,6 +151,7 @@ fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit) {
     val s = Repo.seriesOf(seriesId)
     if (s == null) { EmptyBox(p, "السلسلة غير موجودة"); return }
     val ctx = LocalContext.current
+    val hasMedia = remember(seriesId, Prefs.srcRev.value) { LocalLib.seriesHasMedia(seriesId) }
     val cont = s.items.firstOrNull { vid -> Repo.video(vid)?.let { Prefs.ongoing(vid, it.duration) } == true }
     val finN = s.items.count { vid -> Repo.video(vid)?.let { Prefs.finished(vid, it.duration) } == true }
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
@@ -181,6 +183,16 @@ fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit) {
                     Icon(Icons.Filled.PlayArrow, null, tint = p.gold)
                     Spacer(Modifier.width(6.dp))
                     Text(if (cont != null) "أكمل من حيث توقفت" else "استمع من البداية")
+                }
+                if (hasMedia) {
+                    Spacer(Modifier.width(8.dp))
+                    val local = Prefs.src(seriesId) == "local"
+                    OutlinedButton(
+                        onClick = { Prefs.setSrc(seriesId, if (local) "yt" else "local") },
+                        modifier = Modifier.height(44.dp), shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = if (local) p.gold else p.muted),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, if (local) p.gold else p.soft),
+                    ) { Text(if (local) "محلي" else "يوتيوب", fontSize = 13.sp) }
                 }
                 Spacer(Modifier.width(8.dp))
                 OutlinedButton(

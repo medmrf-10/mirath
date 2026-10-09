@@ -29,10 +29,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.irth.mirath.data.AWord
 import com.irth.mirath.data.QA
+import com.irth.mirath.data.LocalLib
 import com.irth.mirath.data.Repo
 import com.irth.mirath.data.Summary
 import com.irth.mirath.data.buildPhrases
 import com.irth.mirath.player.YtCtl
+import com.irth.mirath.player.LocalPlayer
 import com.irth.mirath.player.YtPlayer
 import com.irth.mirath.store.Prefs
 import com.irth.mirath.ui.theme.Amiri
@@ -72,6 +74,9 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
     val ctl = remember { YtCtl() }
     val scope = rememberCoroutineScope()
     val ser = remember(videoId) { Repo.series?.firstOrNull { it.items.contains(videoId) } }
+    val media = remember(videoId, Prefs.srcRev.value) {
+        LocalLib.mediaFor(videoId)?.takeIf { v.yt.isEmpty() || Prefs.src(ser?.id ?: "") == "local" }
+    }
 
     LaunchedEffect(videoId) {
         Prefs.markOpened(videoId)
@@ -116,7 +121,20 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
             "live" -> LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
                 item {
                     Spacer(Modifier.height(10.dp))
-                    YtPlayer(v.yt, ctl, Prefs.progress(videoId),
+                    if (media != null) LocalPlayer(media, ctl, Prefs.progress(videoId).toInt(),
+                        onEnded = {
+                            Prefs.setProgress(videoId, 0)
+                            if (ser != null) {
+                                val idx = ser.items.indexOf(videoId)
+                                val next = ser.items.drop(idx + 1).firstOrNull { nid ->
+                                    Repo.video(nid)?.let { !Prefs.finished(nid, it.duration) } == true
+                                }
+                                if (next != null) onLesson(next)
+                            }
+                        },
+                        onState = { playing = it == 1 }, p = p,
+                    ) { t -> pos = t }
+                    else YtPlayer(v.yt, ctl, Prefs.progress(videoId),
                         onEnded = {
                             Prefs.setProgress(videoId, 0)
                             if (ser != null) {

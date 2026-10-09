@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -28,6 +29,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import com.irth.mirath.data.Api
 import com.irth.mirath.data.Repo
+import com.irth.mirath.data.LocalLib
 import com.irth.mirath.data.Update
 import com.irth.mirath.store.Prefs
 import com.irth.mirath.ui.*
@@ -39,6 +41,7 @@ import kotlinx.serialization.Serializable
 @Serializable object Home
 @Serializable object Fav
 @Serializable object Stats
+@Serializable object Lib
 @Serializable data class ScienceR(val id: String)
 @Serializable data class SeriesR(val id: String)
 @Serializable data class LessonR(val id: String)
@@ -48,6 +51,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         Prefs.init(applicationContext)
         Api.init(applicationContext)
+        LocalLib.init(applicationContext)
         enableEdgeToEdge()
         setContent { MirathApp() }
     }
@@ -125,6 +129,7 @@ fun MirathApp() {
                             nav.navigate(Home) { popUpTo(Home) { inclusive = true } }
                         }
                         NavItem(p, route.contains("Fav"), "المفضلة", Icons.Filled.Favorite) { nav.navigate(Fav) }
+                        NavItem(p, route.contains("Lib"), "مكتبتي", Icons.Filled.Folder) { nav.navigate(Lib) }
                         NavItem(p, route.contains("Stats"), "إحصائي", Icons.Filled.BarChart) { nav.navigate(Stats) }
                         }
                     }
@@ -153,6 +158,7 @@ fun MirathApp() {
                             HomeScreen(p, onScience = { nav.navigate(ScienceR(it)) }, onLesson = { nav.navigate(LessonR(it)) })
                         }
                         composable<Fav> { FavScreen(p) { id -> nav.navigate(LessonR(id)) } }
+                        composable<Lib> { LibraryScreen(p, onSeries = { nav.navigate(SeriesR(it)) }) }
                         composable<Stats> { StatsScreen(p) }
                         composable<ScienceR> { e ->
                             val r = e.toRoute<ScienceR>()
