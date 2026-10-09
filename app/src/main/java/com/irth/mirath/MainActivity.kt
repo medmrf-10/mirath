@@ -4,8 +4,12 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BarChart
@@ -16,12 +20,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import com.irth.mirath.data.Repo
+import com.irth.mirath.data.Update
 import com.irth.mirath.store.Prefs
 import com.irth.mirath.ui.*
 import com.irth.mirath.ui.theme.MirathTheme
@@ -53,12 +59,19 @@ fun MirathApp() {
     var showTheme by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
     var booted by remember { mutableStateOf(Repo.sciences != null) }
+    var update by remember { mutableStateOf<Update.Found?>(null) }
     val backEntry by nav.currentBackStackEntryAsState()
     val route = backEntry?.destination?.route ?: ""
+    val ctx = androidx.compose.ui.platform.LocalContext.current
 
     LaunchedEffect(Unit) {
         runCatching { Repo.boot() }
         booted = true
+        val vc = runCatching {
+            @Suppress("DEPRECATION")
+            ctx.packageManager.getPackageInfo(ctx.packageName, 0).longVersionCode.toInt()
+        }.getOrDefault(0)
+        if (vc > 0) update = Update.check("mirath", vc)
     }
 
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
@@ -85,12 +98,25 @@ fun MirathApp() {
                     )
                 },
                 bottomBar = {
-                    NavigationBar(containerColor = p.bg, contentColor = p.muted) {
+                    Column {
+                        update?.let { u ->
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)
+                                    .background(p.card, androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                            ) {
+                                Text("تحديث متاح — ${u.version}", color = p.gold, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                                TextButton(onClick = { Update.download(ctx, u, "mirath") }) { Text("نزّل الآن", color = p.primary) }
+                            }
+                        }
+                        NavigationBar(containerColor = p.bg, contentColor = p.muted) {
                         NavItem(p, route.contains("Home") || route.isEmpty(), "الرئيسية", Icons.Filled.Home) {
                             nav.navigate(Home) { popUpTo(Home) { inclusive = true } }
                         }
                         NavItem(p, route.contains("Fav"), "المفضلة", Icons.Filled.Favorite) { nav.navigate(Fav) }
                         NavItem(p, route.contains("Stats"), "إحصائي", Icons.Filled.BarChart) { nav.navigate(Stats) }
+                        }
                     }
                 },
             ) { pad ->
