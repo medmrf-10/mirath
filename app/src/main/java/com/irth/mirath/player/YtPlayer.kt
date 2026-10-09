@@ -18,7 +18,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 
 /** مقبض المشغّل — تنادي seek للقفز في الفيديو. */
-class YtCtl { var seek: (Double) -> Unit = {} }
+class YtCtl {
+    var seek: (Double) -> Unit = {}
+    var play: () -> Unit = {}
+    var pause: () -> Unit = {}
+    var rate: (Double) -> Unit = {}
+    var isPlaying: () -> Boolean = { false }
+}
 
 /** مشغّل يوتيوب مضمّن — نفس أسلوب موقع إرث (iframe API) مع جسر موضعٍ للمحاذاة. */
 @SuppressLint("SetJavaScriptEnabled")
@@ -28,15 +34,21 @@ fun YtPlayer(
     ctl: YtCtl,
     startSec: Int = 0,
     onEnded: () -> Unit = {},
+    onState: (Int) -> Unit = {},
     onTime: (Double) -> Unit,
 ) {
     val webView = remember { mutableListOf<WebView?>(null) }
     val endedFired = remember { booleanArrayOf(false) }
+    val isPlaying = remember { booleanArrayOf(false) }
+    ctl.isPlaying = { isPlaying[0] }
     val handler = remember { Handler(Looper.getMainLooper()) }
 
     DisposableEffect(videoId) {
-        ctl.seek = { sec -> webView[0]?.evaluateJavascript("try{pl&&pl.seekTo($sec,true)}catch(e){}", null) }
-        onDispose { ctl.seek = {} }
+        ctl.seek = { sec -> webView[0]?.evaluateJavascript("try{pl&&pl.seekTo($sec,true);pl.playVideo()}catch(e){}", null) }
+        ctl.play = { webView[0]?.evaluateJavascript("try{pl&&pl.playVideo()}catch(e){}", null) }
+        ctl.pause = { webView[0]?.evaluateJavascript("try{pl&&pl.pauseVideo()}catch(e){}", null) }
+        ctl.rate = { v -> webView[0]?.evaluateJavascript("try{pl&&pl.setPlaybackRate($v)}catch(e){}", null) }
+        onDispose { ctl.seek = {}; ctl.play = {}; ctl.pause = {}; ctl.rate = {}; ctl.isPlaying = { false } }
     }
 
     AndroidView(
@@ -75,8 +87,11 @@ setInterval(function(){try{if(pl&&pl.getCurrentTime)window.ct=pl.getCurrentTime(
                     v?.removeSurrounding("\"")?.toDoubleOrNull()?.let(onTime)
                 }
                 webView[0]?.evaluateJavascript("window.ps") { v ->
-                    if (v?.trim() == "0" && !endedFired[0]) { endedFired[0] = true; onEnded() }
-                    if (v?.trim() == "1") endedFired[0] = false
+                    val st = v?.trim()
+                    if (st == "0" && !endedFired[0]) { endedFired[0] = true; onEnded() }
+                    if (st == "1") endedFired[0] = false
+                    isPlaying[0] = (st == "1")
+                    st?.toIntOrNull()?.let(onState)
                 }
                 handler.postDelayed(this, 300)
             }
