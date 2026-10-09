@@ -9,9 +9,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.FormatListBulleted
+import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -269,50 +274,102 @@ fun StatsScreen(p: Pal) {
             StatRow(p, "الدروس الكلية", "$total")
             StatRow(p, "مدة المكتبة", fmtDur(totalDur))
             StatRow(p, "السلاسل", "${Repo.series?.size ?: 0}")
-            StatRow(p, "دروس فتحتها", "$opened")
-            StatRow(p, "قيد المشاهدة", "$ong")
-            StatRow(p, "دروس أتممتها", "$fin")
+            StatRow(p, "دروس فتحتها", "$opened", if (total > 0) opened.toFloat() / total else 0f)
+            StatRow(p, "قيد المشاهدة", "$ong", if (total > 0) ong.toFloat() / total else 0f)
+            StatRow(p, "دروس أتممتها", "$fin", if (total > 0) fin.toFloat() / total else 0f)
             StatRow(p, "مفضلاتك", "$fav")
         }
     }
 }
 
 @Composable
-private fun StatRow(p: Pal, k: String, v: String) {
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = 6.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Text(k, color = p.muted, style = MaterialTheme.typography.bodyLarge)
-        Text(v, color = p.gold, style = MaterialTheme.typography.titleMedium)
+private fun StatRow(p: Pal, k: String, v: String, frac: Float = -1f) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 7.dp)) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(k, color = p.muted, style = MaterialTheme.typography.bodyLarge)
+            Text(v, color = p.gold, style = MaterialTheme.typography.titleMedium)
+        }
+        if (frac >= 0f) {
+            Box(Modifier.fillMaxWidth().padding(top = 6.dp).height(4.dp).clip(RoundedCornerShape(4.dp)).background(p.soft)) {
+                Box(Modifier.fillMaxWidth(frac.coerceIn(0f, 1f)).fillMaxHeight().clip(RoundedCornerShape(4.dp)).background(p.gold))
+            }
+        }
     }
 }
 
 @Composable
-fun SearchSheet(p: Pal, onLesson: (String) -> Unit) {
+fun SearchSheet(p: Pal, onLesson: (String) -> Unit, onSeries: (String) -> Unit, onScience: (String) -> Unit) {
     var q by remember { mutableStateOf("") }
-    val results = remember(q) { Repo.search(q) }
+    val t = q.trim()
+    val vids = remember(t) { Repo.search(t).take(30) }
+    val sers = remember(t) { if (t.isEmpty()) emptyList() else Repo.series?.filter { it.title.contains(t) }?.take(10) ?: emptyList() }
+    val scis = remember(t) { if (t.isEmpty()) emptyList() else Repo.sciences?.filter { it.name.contains(t) } ?: emptyList() }
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
         OutlinedTextField(
             value = q, onValueChange = { q = it },
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("ابحث في الدروس…", color = p.muted) },
+            placeholder = { Text("ابحث: درساً أو سلسلة أو علماً…", color = p.muted) },
+            leadingIcon = { Icon(Icons.Filled.Search, null, tint = p.muted) },
+            trailingIcon = {
+                if (q.isNotEmpty()) IconButton(onClick = { q = "" }) { Icon(Icons.Filled.Close, null, tint = p.muted) }
+            },
             singleLine = true,
             shape = RoundedCornerShape(999.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = p.gold, unfocusedBorderColor = p.line,
+                cursorColor = p.gold, focusedTextColor = p.text, unfocusedTextColor = p.text,
+            ),
         )
         Spacer(Modifier.height(10.dp))
-        LazyColumn(Modifier.heightIn(max = 380.dp)) {
-            itemsIndexed(results.take(40)) { _, v ->
-                ListItem(
-                    headlineContent = { Text(v.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    supportingContent = { Text(fmtDur(v.duration), color = p.gold) },
-                    leadingContent = { Icon(Icons.Filled.PlayArrow, null, tint = p.muted) },
-                    modifier = Modifier
-                        .padding(vertical = 2.dp)
-                        .clickable { onLesson(v.id) },
-                    colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
-                )
-                Divider(color = p.line)
+        LazyColumn(Modifier.heightIn(max = 420.dp)) {
+            if (t.isNotEmpty() && vids.isEmpty() && sers.isEmpty() && scis.isEmpty()) {
+                item {
+                    Column(Modifier.fillMaxWidth().padding(36.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Filled.SearchOff, null, tint = p.muted, modifier = Modifier.size(34.dp))
+                        Text("لا نتائج لـ«$t»", color = p.muted, modifier = Modifier.padding(top = 8.dp))
+                    }
+                }
+            }
+            if (scis.isNotEmpty()) {
+                item { SectionTitle(p, "العلوم") }
+                itemsIndexed(scis) { _, s ->
+                    ListItem(
+                        headlineContent = { Text(s.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        leadingContent = { Icon(Icons.Filled.MenuBook, null, tint = p.gold) },
+                        modifier = Modifier.clickable { onScience(s.id) },
+                        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                    )
+                }
+            }
+            if (sers.isNotEmpty()) {
+                item { SectionTitle(p, "السلاسل") }
+                itemsIndexed(sers) { _, s ->
+                    ListItem(
+                        headlineContent = { Text(s.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        supportingContent = { Text(pl3(s.items.size, "درس", "درسان", "دروس", "درساً"), color = p.gold) },
+                        leadingContent = { Icon(Icons.Filled.FormatListBulleted, null, tint = p.gold) },
+                        modifier = Modifier.clickable { onSeries(s.id) },
+                        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                    )
+                }
+            }
+            if (vids.isNotEmpty()) {
+                item { SectionTitle(p, "الدروس") }
+                itemsIndexed(vids) { _, v ->
+                    ListItem(
+                        headlineContent = { Text(v.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                        supportingContent = { Text(fmtDur(v.duration), color = p.gold) },
+                        leadingContent = { Icon(Icons.Filled.PlayArrow, null, tint = p.muted) },
+                        modifier = Modifier
+                            .padding(vertical = 2.dp)
+                            .clickable { onLesson(v.id) },
+                        colors = ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                    )
+                    HorizontalDivider(color = p.line)
+                }
             }
         }
     }

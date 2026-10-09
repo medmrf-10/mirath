@@ -1,5 +1,6 @@
 package com.irth.mirath.data
 
+import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -8,6 +9,7 @@ import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.jsonObject
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 object Api {
@@ -20,11 +22,29 @@ object Api {
 
     val json = Json { ignoreUnknownKeys = true }
 
+    private var cacheDir: File? = null
+
+    fun init(ctx: Context) {
+        if (cacheDir == null) cacheDir = File(ctx.cacheDir, "http").apply { mkdirs() }
+    }
+
+    private fun cacheFile(path: String): File? =
+        cacheDir?.let { File(it, path.hashCode().toString(16) + ".cache") }
+
+    /** جلب نص مع كاش قرصي: عند فشل الشبكة يُقدَّم آخر نسخة ناجحة. */
     suspend fun get(path: String): String = withContext(Dispatchers.IO) {
-        val req = Request.Builder().url("$BASE$path").build()
-        client.newCall(req).execute().use { r ->
-            if (!r.isSuccessful) error("HTTP ${r.code} on $path")
-            r.body?.string() ?: ""
+        val cf = cacheFile(path)
+        try {
+            val req = Request.Builder().url("$BASE$path").build()
+            client.newCall(req).execute().use { r ->
+                if (!r.isSuccessful) error("HTTP ${r.code} on $path")
+                val body = r.body?.string() ?: ""
+                runCatching { cf?.writeText(body) }
+                body
+            }
+        } catch (e: Exception) {
+            val cached = cf?.takeIf { it.exists() }?.readText()
+            if (cached != null) cached else throw e
         }
     }
 

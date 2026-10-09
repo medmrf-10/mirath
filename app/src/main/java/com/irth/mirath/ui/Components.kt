@@ -1,6 +1,8 @@
 package com.irth.mirath.ui
 
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -158,6 +160,58 @@ fun EmptyBox(p: Pal, text: String) {
 fun LoadingBox(p: Pal) {
     Box(Modifier.fillMaxWidth().padding(60.dp), contentAlignment = Alignment.Center) {
         CircularProgressIndicator(color = p.gold, strokeWidth = 2.dp)
+    }
+}
+
+/** هيكل تحميل ينبض بلطف بدل دائرة الانتظار. */
+@Composable
+fun SkeletonHome(p: Pal) {
+    val inf = rememberInfiniteTransition(label = "sk")
+    val a by inf.animateFloat(
+        initialValue = 0.35f, targetValue = 0.8f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable<Float>(
+            tween(900), androidx.compose.animation.core.RepeatMode.Reverse,
+        ),
+        label = "sk",
+    )
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
+        repeat(6) {
+            Row(
+                Modifier.fillMaxWidth().padding(bottom = 12.dp).alpha(a),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.size(56.dp).clip(CircleShape).background(p.soft))
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Box(Modifier.fillMaxWidth(0.7f).height(16.dp).clip(RoundedCornerShape(4.dp)).background(p.soft))
+                    Spacer(Modifier.height(8.dp))
+                    Box(Modifier.fillMaxWidth(0.4f).height(11.dp).clip(RoundedCornerShape(4.dp)).background(p.soft))
+                }
+            }
+        }
+    }
+}
+
+/** شاشة خطأ مع زر إعادة — تُستخدم عند فشل إقلاع المكتبة. */
+@Composable
+fun ErrorBox(p: Pal, title: String, sub: String, onRetry: () -> Unit) {
+    Column(
+        Modifier.fillMaxSize().padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(Icons.Filled.CloudOff, null, tint = p.muted, modifier = Modifier.size(44.dp))
+        Spacer(Modifier.height(14.dp))
+        Text(title, color = p.text, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(6.dp))
+        Text(sub, color = p.muted, style = MaterialTheme.typography.bodyMedium)
+        Spacer(Modifier.height(16.dp))
+        OutlinedButton(
+            onClick = onRetry,
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = p.gold),
+            border = androidx.compose.foundation.BorderStroke(1.dp, p.line),
+        ) { Icon(Icons.Filled.Refresh, null); Spacer(Modifier.width(6.dp)); Text("أعد المحاولة") }
     }
 }
 

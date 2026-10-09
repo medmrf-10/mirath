@@ -26,12 +26,14 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
+import com.irth.mirath.data.Api
 import com.irth.mirath.data.Repo
 import com.irth.mirath.data.Update
 import com.irth.mirath.store.Prefs
 import com.irth.mirath.ui.*
 import com.irth.mirath.ui.theme.MirathTheme
 import com.irth.mirath.ui.theme.palOf
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 
 @Serializable object Home
@@ -45,6 +47,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Prefs.init(applicationContext)
+        Api.init(applicationContext)
         enableEdgeToEdge()
         setContent { MirathApp() }
     }
@@ -59,14 +62,21 @@ fun MirathApp() {
     var showTheme by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
     var booted by remember { mutableStateOf(Repo.sciences != null) }
+    var bootErr by remember { mutableStateOf(false) }
     var update by remember { mutableStateOf<Update.Found?>(null) }
     val backEntry by nav.currentBackStackEntryAsState()
     val route = backEntry?.destination?.route ?: ""
     val ctx = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    suspend fun doBoot() {
+        runCatching { Repo.boot() }.onFailure { bootErr = true }
+        if (Repo.sciences != null) bootErr = false
+        booted = true
+    }
 
     LaunchedEffect(Unit) {
-        runCatching { Repo.boot() }
-        booted = true
+        doBoot()
         val vc = runCatching {
             @Suppress("DEPRECATION")
             ctx.packageManager.getPackageInfo(ctx.packageName, 0).longVersionCode.toInt()
@@ -121,7 +131,12 @@ fun MirathApp() {
                 },
             ) { pad ->
                 if (!booted) {
-                    LoadingBox(p)
+                    SkeletonHome(p)
+                } else if (bootErr && Repo.sciences == null) {
+                    ErrorBox(p, "تعذر تحميل المكتبة", "تحقق من اتصالك ثم أعد المحاولة") {
+                        bootErr = false; booted = false
+                        scope.launch { doBoot() }
+                    }
                 } else {
                     NavHost(
                         navController = nav,
@@ -129,6 +144,10 @@ fun MirathApp() {
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(top = pad.calculateTopPadding(), bottom = pad.calculateBottomPadding()),
+                        enterTransition = { androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(220)) + androidx.compose.animation.slideInVertically(androidx.compose.animation.core.tween(260)) { it / 14 } },
+                        exitTransition = { androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(160)) },
+                        popEnterTransition = { androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(220)) },
+                        popExitTransition = { androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(160)) },
                     ) {
                         composable<Home> {
                             HomeScreen(p, onScience = { nav.navigate(ScienceR(it)) }, onLesson = { nav.navigate(LessonR(it)) })
@@ -158,7 +177,12 @@ fun MirathApp() {
             }
             if (showSearch) {
                 ModalBottomSheet(onDismissRequest = { showSearch = false }, containerColor = p.card) {
-                    SearchSheet(p) { id -> showSearch = false; nav.navigate(LessonR(id)) }
+                    SearchSheet(
+                        p,
+                        onLesson = { id -> showSearch = false; nav.navigate(LessonR(id)) },
+                        onSeries = { id -> showSearch = false; nav.navigate(SeriesR(id)) },
+                        onScience = { id -> showSearch = false; nav.navigate(ScienceR(id)) },
+                    )
                 }
             }
         }
