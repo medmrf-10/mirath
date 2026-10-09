@@ -96,6 +96,8 @@ fun RowCard(
     subtitle: String = "",
     meta: String = "",
     tag: String = "",
+    dim: Boolean = false,
+    bar: Float = 0f,
     leading: (@Composable () -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
     onClick: () -> Unit,
@@ -117,9 +119,9 @@ fun RowCard(
     ) {
         if (leading != null) { leading(); Spacer(Modifier.width(12.dp)) }
         Column(Modifier.weight(1f)) {
-            Text(title, color = p.text, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            if (subtitle.isNotEmpty()) Text(subtitle, color = p.muted, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            if (meta.isNotEmpty()) Text(meta, color = p.gold, style = MaterialTheme.typography.labelMedium)
+            Text(title, color = p.text, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.alpha(if (dim) 0.55f else 1f))
+            if (subtitle.isNotEmpty()) Text(subtitle, color = p.muted, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.alpha(if (dim) 0.5f else 1f))
+            if (meta.isNotEmpty()) Text(meta, color = p.gold, style = MaterialTheme.typography.labelMedium, modifier = Modifier.alpha(if (dim) 0.45f else 1f))
         }
         if (tag.isNotEmpty()) {
             Text(tag, color = p.gold, fontSize = 11.sp, modifier = Modifier
@@ -129,7 +131,15 @@ fun RowCard(
         }
         if (trailing != null) trailing() else Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, null, tint = p.muted)
     }
-    Spacer(Modifier.height(10.dp))
+    if (bar > 0f) {
+        Box(
+            Modifier.fillMaxWidth().padding(top = 6.dp).height(3.dp)
+                .clip(RoundedCornerShape(3.dp)).background(p.soft),
+        ) {
+            Box(Modifier.fillMaxWidth(bar.coerceIn(0f, 1f)).fillMaxHeight().clip(RoundedCornerShape(3.dp)).background(p.gold))
+        }
+        Spacer(Modifier.height(4.dp))
+    } else Spacer(Modifier.height(10.dp))
 }
 
 @Composable
@@ -152,13 +162,23 @@ fun LoadingBox(p: Pal) {
 }
 
 @Composable
-fun PhIcon(p: Pal, ch: String, size: Int = 56) {
+fun PhIcon(p: Pal, ch: String, size: Int = 56, done: Boolean = false) {
     Box(
-        Modifier.size(size.dp).clip(RoundedCornerShape((size * 0.27).toInt().dp)).background(p.soft),
+        Modifier.size(size.dp).clip(CircleShape).background(p.soft)
+            .border(2.dp, p.gold.copy(alpha = 0.85f), CircleShape),
         contentAlignment = Alignment.Center,
     ) {
-        Text(ch, fontFamily = Amiri, fontWeight = FontWeight.Bold, fontSize = (size * 0.42).sp, color = p.primary)
+        if (done) Icon(Icons.Filled.Check, "مُتمّ", tint = p.gold, modifier = Modifier.size((size * 0.4).dp))
+        else Text(ch, fontFamily = Amiri, fontWeight = FontWeight.Bold, fontSize = (size * 0.42).sp, color = p.primary)
     }
+}
+
+/** جمع عربي مثل pl3 في إرث: pl3(n,"درس","درسان","دروس","درساً") */
+fun pl3(n: Int, one: String, two: String, few: String, many: String): String = when {
+    n == 1 -> one
+    n == 2 -> two
+    n in 3..10 -> "$n $few"
+    else -> "$n $many"
 }
 
 fun fmtDur(sec: Int): String {

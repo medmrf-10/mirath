@@ -35,7 +35,7 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun LessonScreen(p: Pal, videoId: String) {
+fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
     val v = Repo.video(videoId)
     if (v == null) { EmptyBox(p, "الدرس غير موجود"); return }
 
@@ -66,7 +66,17 @@ fun LessonScreen(p: Pal, videoId: String) {
         item {
             Column(Modifier.padding(horizontal = 16.dp)) {
                 Spacer(Modifier.height(10.dp))
-                YtPlayer(v.yt, ctl, Prefs.progress(videoId)) { pos = it }
+                YtPlayer(v.yt, ctl, Prefs.progress(videoId), onEnded = {
+                    Prefs.setProgress(videoId, 0)
+                    val ser = Repo.series?.firstOrNull { it.items.contains(videoId) }
+                    if (ser != null) {
+                        val idx = ser.items.indexOf(videoId)
+                        val next = ser.items.drop(idx + 1).firstOrNull { nid ->
+                            Repo.video(nid)?.let { !Prefs.finished(nid, it.duration) } == true
+                        }
+                        if (next != null) onLesson(next)
+                    }
+                }) { pos = it }
                 Spacer(Modifier.height(10.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -147,7 +157,7 @@ fun LessonScreen(p: Pal, videoId: String) {
                 val qs = questions
                 if (qs == null) item { LoadingBox(p) }
                 else {
-                    itemsIndexed(qs) { i, qa -> QCard(p, i, qa) }
+                    itemsIndexed(qs) { i, qa -> QCard(p, videoId, i, qa) }
                     item { Spacer(Modifier.height(40.dp)) }
                 }
             }
@@ -169,7 +179,7 @@ private fun RowScope.ModeTab(p: Pal, label: String, ic: androidx.compose.ui.grap
 }
 
 @Composable
-private fun QCard(p: Pal, i: Int, qa: QA) {
+private fun QCard(p: Pal, videoId: String, i: Int, qa: QA) {
     var open by remember { mutableStateOf(false) }
     Column(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 5.dp)
@@ -185,6 +195,19 @@ private fun QCard(p: Pal, i: Int, qa: QA) {
         if (open) {
             Divider(color = p.line, modifier = Modifier.padding(vertical = 10.dp))
             Text(qa.a, color = p.muted, style = MaterialTheme.typography.bodyLarge)
+            val r = Prefs.rate(videoId, i)
+            Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("قيّم إجابتك:", color = p.muted, fontSize = 12.sp)
+                (1..5).forEach { n ->
+                    IconButton(onClick = { Prefs.setRate(videoId, i, n) }, modifier = Modifier.size(30.dp)) {
+                        Icon(
+                            if (n <= r) Icons.Filled.Star else Icons.Filled.StarBorder,
+                            "تقييم $n", tint = if (n <= r) p.gold else p.muted,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+            }
         }
     }
 }

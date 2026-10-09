@@ -27,9 +27,11 @@ fun YtPlayer(
     videoId: String,
     ctl: YtCtl,
     startSec: Int = 0,
+    onEnded: () -> Unit = {},
     onTime: (Double) -> Unit,
 ) {
     val webView = remember { mutableListOf<WebView?>(null) }
+    val endedFired = remember { booleanArrayOf(false) }
     val handler = remember { Handler(Looper.getMainLooper()) }
 
     DisposableEffect(videoId) {
@@ -57,7 +59,7 @@ fun YtPlayer(
 var pl;window.ct=0;
 function onYouTubeIframeAPIReady(){pl=new YT.Player('p',{videoId:'$videoId',
 playerVars:{rel:0,playsinline:1,enablejsapi:1,start:$startSec},
-events:{onStateChange:function(e){if(e.data==1)window.ct=pl.getCurrentTime()}}});}
+events:{onStateChange:function(e){window.ps=e.data;if(e.data==1)window.ct=pl.getCurrentTime()}}});}
 setInterval(function(){try{if(pl&&pl.getCurrentTime)window.ct=pl.getCurrentTime()}catch(e){}},200);
 </script><script src="https://www.youtube.com/iframe_api"></script></body></html>""",
                     "text/html", "utf-8", null,
@@ -71,6 +73,10 @@ setInterval(function(){try{if(pl&&pl.getCurrentTime)window.ct=pl.getCurrentTime(
             override fun run() {
                 webView[0]?.evaluateJavascript("window.ct") { v ->
                     v?.removeSurrounding("\"")?.toDoubleOrNull()?.let(onTime)
+                }
+                webView[0]?.evaluateJavascript("window.ps") { v ->
+                    if (v?.trim() == "0" && !endedFired[0]) { endedFired[0] = true; onEnded() }
+                    if (v?.trim() == "1") endedFired[0] = false
                 }
                 handler.postDelayed(this, 300)
             }

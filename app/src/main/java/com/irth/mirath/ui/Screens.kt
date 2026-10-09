@@ -1,5 +1,8 @@
 package com.irth.mirath.ui
 
+import android.content.Intent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -9,23 +12,34 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
-import com.irth.mirath.data.Api
+import androidx.compose.ui.unit.sp
 import com.irth.mirath.data.Repo
-import com.irth.mirath.data.Video
 import com.irth.mirath.store.Prefs
 import com.irth.mirath.ui.theme.Pal
 
+private fun progressBar(id: String, duration: Int): Float {
+    val pv = Prefs.progress(id)
+    return if (pv > 10 && duration > 0) (pv.toFloat() / duration).coerceAtMost(0.98f) else 0f
+}
+
 @Composable
-fun HomeScreen(p: Pal, onScience: (String) -> Unit) {
+fun HomeScreen(p: Pal, onScience: (String) -> Unit, onLesson: (String) -> Unit) {
     val sciences = Repo.sciences
     if (sciences == null) { LoadingBox(p); return }
+    val lastId = Prefs.last()
+    val lastV = lastId?.let { Repo.video(it) }
+    val recent = Prefs.recent.value.mapNotNull { Repo.video(it) }.filter { Prefs.progress(it.id) > 10 }.take(4)
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         item {
             Column(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -33,6 +47,50 @@ fun HomeScreen(p: Pal, onScience: (String) -> Unit) {
                 Text("اختر علماً لتصف سلاسله", color = p.muted, style = MaterialTheme.typography.bodyMedium)
             }
         }
+        if (lastV != null && Prefs.ongoing(lastV.id, lastV.duration)) {
+            item {
+                Row(
+                    Modifier.fillMaxWidth().padding(bottom = 14.dp)
+                        .clip(RoundedCornerShape(16.dp)).background(p.card).border(1.dp, p.gold, RoundedCornerShape(16.dp))
+                        .clickable { onLesson(lastV.id) }.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.PlayArrow, null, tint = p.gold, modifier = Modifier.size(30.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("أكمل المشاهدة", color = p.gold, style = MaterialTheme.typography.labelMedium)
+                        Text(lastV.title, color = p.text, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        val left = (lastV.duration - Prefs.progress(lastV.id)).coerceAtLeast(0)
+                        if (left > 0) Text("متبقٍ ${fmtDur(left)}", color = p.muted, style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+        }
+        if (recent.isNotEmpty()) {
+            item {
+                SectionTitle(p, "آخر ما شغّلت")
+                Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    recent.forEach { v ->
+                        Column(
+                            Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(p.card)
+                                .border(1.dp, p.line, RoundedCornerShape(14.dp))
+                                .clickable { onLesson(v.id) }.padding(8.dp),
+                        ) {
+                            Box(
+                                Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(10.dp)).background(p.soft),
+                                contentAlignment = Alignment.Center,
+                            ) { Text("${v.title.firstOrNull() ?: "؟"}", color = p.gold, fontWeight = FontWeight.Bold, fontSize = 22.sp) }
+                            Text(v.title, color = p.muted, fontSize = 11.5.sp, lineHeight = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp).height(32.dp))
+                            Box(Modifier.fillMaxWidth().padding(top = 5.dp).height(3.dp).clip(RoundedCornerShape(3.dp)).background(p.soft)) {
+                                Box(Modifier.fillMaxWidth(progressBar(v.id, v.duration)).fillMaxHeight().clip(RoundedCornerShape(3.dp)).background(p.gold))
+                            }
+                        }
+                    }
+                    repeat(4 - recent.size) { Spacer(Modifier.weight(1f)) }
+                }
+            }
+        }
+        item { SectionTitle(p, "العلوم") }
         itemsIndexed(sciences) { i, s ->
             RowCard(p, i, s.name, onClick = { onScience(s.id) }, leading = { PhIcon(p, s.name.first().toString()) })
         }
@@ -59,9 +117,21 @@ fun ScienceScreen(p: Pal, scienceId: String, onSeries: (String) -> Unit, onLesso
         item { SectionTitle(p, "السلاسل") }
         itemsIndexed(series) { i, s ->
             val n = s.items.size
+            val nw = s.items.count { Prefs.progress(it) <= 10 }
+            val finN = s.items.count { vid -> Repo.video(vid)?.let { Prefs.finished(vid, it.duration) } == true }
+            val wp = if (n > 0) finN * 100 / n else 0
+            val tag = when {
+                wp == 100 -> "اكتملت ✓"
+                nw == n -> "لم تشاهدها"
+                nw > 0 -> pl3(nw, "درس جديد", "درسان جديدان", "دروس جديدة", "درساً جديداً")
+                else -> ""
+            }
+            val sheikh = s.items.firstOrNull()?.let { Repo.video(it)?.speakers?.firstOrNull() }?.let { Repo.personName(it) } ?: ""
             RowCard(
                 p, i, s.title,
-                meta = "$n ${if (n in 3..10) "دروس" else "درساً"}",
+                meta = listOf(pl3(n, "درس", "درسان", "دروس", "درساً"), sheikh, s.kind).filter { it.isNotEmpty() }.joinToString(" · "),
+                tag = tag,
+                bar = if (wp in 1..99) wp / 100f else 0f,
                 leading = { PhIcon(p, s.title.first().toString()) },
                 onClick = { onSeries(s.id) },
             )
@@ -74,25 +144,71 @@ fun ScienceScreen(p: Pal, scienceId: String, onSeries: (String) -> Unit, onLesso
 fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit) {
     val s = Repo.seriesOf(seriesId)
     if (s == null) { EmptyBox(p, "السلسلة غير موجودة"); return }
+    val ctx = LocalContext.current
+    val cont = s.items.firstOrNull { vid -> Repo.video(vid)?.let { Prefs.ongoing(vid, it.duration) } == true }
+    val finN = s.items.count { vid -> Repo.video(vid)?.let { Prefs.finished(vid, it.duration) } == true }
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         item {
             Column(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(s.title, style = MaterialTheme.typography.displayLarge, color = p.text)
-                Text("${s.items.size} درساً", color = p.gold, style = MaterialTheme.typography.labelMedium)
+                Text(pl3(s.items.size, "درس", "درسان", "دروس", "درساً"), color = p.gold, style = MaterialTheme.typography.labelMedium)
+            }
+        }
+        if (finN > 0) {
+            item {
+                Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
+                    Text("شاهدت ${pl3(finN, "درساً واحداً", "درسين", "دروساً", "درساً")} من ${s.items.size}", color = p.muted, fontSize = 13.sp)
+                    Box(Modifier.fillMaxWidth().padding(top = 6.dp).height(4.dp).clip(RoundedCornerShape(4.dp)).background(p.soft)) {
+                        Box(Modifier.fillMaxWidth(finN.toFloat() / s.items.size).fillMaxHeight().clip(RoundedCornerShape(4.dp)).background(p.gold))
+                    }
+                }
+            }
+        }
+        item {
+            Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(
+                    onClick = { onLesson(cont ?: s.items.first()) },
+                    modifier = Modifier.weight(1f).height(44.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = p.gold),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, p.line),
+                ) {
+                    Icon(Icons.Filled.PlayArrow, null, tint = p.gold)
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (cont != null) "أكمل من حيث توقفت" else "استمع من البداية")
+                }
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(
+                    onClick = {
+                        val send = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_TEXT, "${s.title} — إرث\nhttps://medmrf-10.github.io/irth/#/series/$seriesId")
+                        }
+                        ctx.startActivity(Intent.createChooser(send, "مشاركة السلسلة"))
+                    },
+                    modifier = Modifier.size(44.dp), shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = p.muted),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, p.soft),
+                    contentPadding = PaddingValues(0.dp),
+                ) { Icon(Icons.Filled.Share, "مشاركة السلسلة", tint = p.muted, modifier = Modifier.size(18.dp)) }
             }
         }
         itemsIndexed(s.items) { i, vid ->
             val v = Repo.video(vid) ?: return@itemsIndexed
-            val prg = Prefs.progress(vid)
+            val pv = Prefs.progress(vid)
+            val fin = Prefs.finished(vid, v.duration)
+            val ong = Prefs.ongoing(vid, v.duration)
             val meta = buildString {
                 append(fmtDur(v.duration))
-                if (v.speakers.isNotEmpty()) append(" · ").append(v.speakers.joinToString("، ") { Repo.personName(it) })
-                if (prg > 0) append(" · بقي ").append(fmtDur((v.duration - prg).coerceAtLeast(0)))
+                if (ong) append(" · متبقٍ ").append(fmtDur((v.duration - pv).coerceAtLeast(0)))
+                if (Prefs.isFav(vid)) append(" · ♥")
             }
             RowCard(
                 p, i, v.title,
                 meta = meta,
-                leading = { PhIcon(p, "${i + 1}") },
+                dim = fin,
+                bar = if (ong && !fin) progressBar(vid, v.duration) else 0f,
+                leading = { PhIcon(p, "${i + 1}", done = fin) },
                 trailing = {
                     IconButton(onClick = { Prefs.toggleFav(vid) }) {
                         Icon(
@@ -120,7 +236,9 @@ fun FavScreen(p: Pal, onLesson: (String) -> Unit) {
         itemsIndexed(favs) { i, v ->
             RowCard(
                 p, i, v.title, meta = fmtDur(v.duration),
-                leading = { PhIcon(p, v.title.first().toString()) },
+                dim = Prefs.finished(v.id, v.duration),
+                bar = progressBar(v.id, v.duration).takeIf { Prefs.ongoing(v.id, v.duration) } ?: 0f,
+                leading = { PhIcon(p, v.title.first().toString(), done = Prefs.finished(v.id, v.duration)) },
                 trailing = {
                     IconButton(onClick = { Prefs.toggleFav(v.id) }) {
                         Icon(Icons.Filled.Favorite, null, tint = p.gold)
@@ -136,6 +254,8 @@ fun FavScreen(p: Pal, onLesson: (String) -> Unit) {
 fun StatsScreen(p: Pal) {
     val vids = Repo.videos ?: emptyList()
     val opened = Prefs.openedCount()
+    val fin = vids.count { Prefs.finished(it.id, it.duration) }
+    val ong = vids.count { Prefs.ongoing(it.id, it.duration) }
     val fav = Prefs.favs.value.size
     val total = vids.size
     val totalDur = vids.sumOf { it.duration }
@@ -150,6 +270,8 @@ fun StatsScreen(p: Pal) {
             StatRow(p, "مدة المكتبة", fmtDur(totalDur))
             StatRow(p, "السلاسل", "${Repo.series?.size ?: 0}")
             StatRow(p, "دروس فتحتها", "$opened")
+            StatRow(p, "قيد المشاهدة", "$ong")
+            StatRow(p, "دروس أتممتها", "$fin")
             StatRow(p, "مفضلاتك", "$fav")
         }
     }

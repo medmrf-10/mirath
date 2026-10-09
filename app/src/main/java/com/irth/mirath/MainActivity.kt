@@ -104,7 +104,9 @@ fun MirathApp() {
                             .fillMaxSize()
                             .padding(top = pad.calculateTopPadding(), bottom = pad.calculateBottomPadding()),
                     ) {
-                        composable<Home> { HomeScreen(p) { id -> nav.navigate(ScienceR(id)) } }
+                        composable<Home> {
+                            HomeScreen(p, onScience = { nav.navigate(ScienceR(it)) }, onLesson = { nav.navigate(LessonR(it)) })
+                        }
                         composable<Fav> { FavScreen(p) { id -> nav.navigate(LessonR(id)) } }
                         composable<Stats> { StatsScreen(p) }
                         composable<ScienceR> { e ->
@@ -117,7 +119,7 @@ fun MirathApp() {
                         }
                         composable<LessonR> { e ->
                             val r = e.toRoute<LessonR>()
-                            LessonScreen(p, r.id)
+                            LessonScreen(p, r.id, onLesson = { nav.navigate(LessonR(it)) { launchSingleTop = true } })
                         }
                     }
                 }
