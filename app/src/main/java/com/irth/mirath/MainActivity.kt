@@ -41,6 +41,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
 import com.irth.mirath.data.Api
+import com.irth.mirath.data.Haw
 import com.irth.mirath.data.Repo
 import com.irth.mirath.data.LocalLib
 import com.irth.mirath.player.G
@@ -94,6 +95,7 @@ fun MirathApp() {
         runCatching { Repo.boot() }.onFailure { bootErr = true }
         if (Repo.sciences != null) bootErr = false
         booted = true
+        Haw.prefetchAll(scope)
     }
 
     LaunchedEffect(Unit) {

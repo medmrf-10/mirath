@@ -1,5 +1,8 @@
 package com.irth.mirath.data
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.doubleOrNull
@@ -47,6 +50,14 @@ object Haw {
         }
         Repo.sciences = (Repo.sciences ?: emptyList()) + sci
         Repo.series = (Repo.series ?: emptyList()) + ser
+    }
+
+    /** تعبئة كل سلاسل هوشات في الخلفية — بحث/عدّادات/اقتراحات تعمل فوراً بلا فتح كل سلسلة. */
+    fun prefetchAll(scope: CoroutineScope) {
+        val shells = Repo.series?.filter { it.kind == "hawshat" }?.map { it.id } ?: return
+        scope.launch(Dispatchers.IO) {
+            shells.forEach { runCatching { ensure(it) } }
+        }
     }
 
     /** يُستدعى عند فتح سلسلة هوشات — يحمّل الدروس وطبقاتها ويسجّل الفيديوهات. */
@@ -106,6 +117,10 @@ object Haw {
     }
     suspend fun questions(id: String): List<QA> {
         val (slug, nnn) = paths(id) ?: return emptyList()
-        return runCatching { Api.decode<Questions>(getJson("/playlists/lessons/$slug/$nnn.questions.json")).questions }.getOrDefault(emptyList())
+        return runCatching {
+            val o = getJson("/playlists/lessons/$slug/$nnn.qu.json").jsonObject
+            val qaEl = o["qa"] ?: o["questions"] ?: return@runCatching emptyList()
+            Api.decode<Questions>(kotlinx.serialization.json.JsonObject(mapOf("questions" to qaEl))).questions
+        }.getOrDefault(emptyList())
     }
 }
