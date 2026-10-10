@@ -37,7 +37,7 @@ object Roadmaps {
     fun get(ctx: Context, id: String): Roadmap? = all(ctx).firstOrNull { it.id == id }
 
     private fun stepLessons(st: RStep): List<String> {
-        if (st.lesson.isNotEmpty()) return listOf(st.series + "|" + st.lesson)
+        if (st.lesson.isNotEmpty()) return listOf(st.lesson)
         return Repo.seriesOf(st.series)?.items?.map { it } ?: emptyList()
     }
 

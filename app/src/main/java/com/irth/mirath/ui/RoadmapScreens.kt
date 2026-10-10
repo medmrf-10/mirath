@@ -40,6 +40,7 @@ fun RoadmapEditor(p: Pal, ctx: android.content.Context, rm0: Roadmap?, onDone: (
     var steps by remember { mutableStateOf(rm0?.steps ?: emptyList()) }
     var pickOpen by remember { mutableStateOf(false) }
     var q by remember { mutableStateOf("") }
+    var pickSeries by remember { mutableStateOf<String?>(null) }
 
     Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 10.dp)) {
         Text(if (rm0 == null) "خريطة طريق جديدة" else "تحرير الخريطة", style = MaterialTheme.typography.titleLarge, color = p.text, modifier = Modifier.padding(bottom = 10.dp))
@@ -59,8 +60,13 @@ fun RoadmapEditor(p: Pal, ctx: android.content.Context, rm0: Roadmap?, onDone: (
             ) {
                 Text("${i + 1}", color = p.gold, fontSize = 13.sp, modifier = Modifier.width(22.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(sr?.title ?: st.series, color = p.text, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    sr?.let { Text(pl3(it.items.size, "درس", "درسان", "دروس", "درساً"), color = p.muted, fontSize = 11.sp) }
+                    if (st.lesson.isNotEmpty()) {
+                        Text(Repo.video(st.lesson)?.title ?: st.lesson, color = p.text, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("درس مفرد — ${sr?.title ?: ""}", color = p.muted, fontSize = 11.sp)
+                    } else {
+                        Text(sr?.title ?: st.series, color = p.text, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        sr?.let { Text(pl3(it.items.size, "درس", "درسان", "دروس", "درساً"), color = p.muted, fontSize = 11.sp) }
+                    }
                 }
                 IconButton(onClick = { if (i > 0) steps = steps.toMutableList().apply { add(i - 1, removeAt(i)) } }) { Icon(Icons.Filled.KeyboardArrowUp, null, tint = p.muted) }
                 IconButton(onClick = { if (i < steps.lastIndex) steps = steps.toMutableList().apply { add(i + 1, removeAt(i)) } }) { Icon(Icons.Filled.KeyboardArrowDown, null, tint = p.muted) }
@@ -68,23 +74,56 @@ fun RoadmapEditor(p: Pal, ctx: android.content.Context, rm0: Roadmap?, onDone: (
             }
         }
         if (pickOpen) {
-            Field(p, q, "ابحث عن سلسلة لإضافتها…") { q = it }
-            val all = Repo.series ?: emptyList()
-            val hits = if (q.isBlank()) all.take(12) else all.filter { it.title.contains(q, true) }.take(12)
-            LazyColumn(Modifier.fillMaxWidth().height(220.dp).padding(top = 6.dp)) {
-                itemsIndexed(hits) { _, sr ->
-                    Row(
-                        Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(10.dp))
-                            .background(p.card).border(1.dp, p.line, RoundedCornerShape(10.dp))
-                            .clickable { steps = steps + RStep(sr.id); pickOpen = false; q = "" }
-                            .padding(horizontal = 10.dp, vertical = 9.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(seriesIconOf(sr.icon), null, tint = p.gold, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(sr.title, color = p.text, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                        Text(pl3(sr.items.size, "درس", "درسان", "دروس", "درساً"), color = p.muted, fontSize = 11.sp)
+            if (pickSeries == null) {
+                Field(p, q, "ابحث عن سلسلة لإضافتها…") { q = it }
+                val all = Repo.series ?: emptyList()
+                val hits = if (q.isBlank()) all.take(12) else all.filter { it.title.contains(q, true) }.take(12)
+                LazyColumn(Modifier.fillMaxWidth().height(220.dp).padding(top = 6.dp)) {
+                    itemsIndexed(hits) { _, sr ->
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(10.dp))
+                                .background(p.card).border(1.dp, p.line, RoundedCornerShape(10.dp))
+                                .clickable { pickSeries = sr.id }
+                                .padding(horizontal = 10.dp, vertical = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(seriesIconOf(sr.icon), null, tint = p.gold, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(sr.title, color = p.text, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            Text(pl3(sr.items.size, "درس", "درسان", "دروس", "درساً"), color = p.muted, fontSize = 11.sp)
+                        }
                     }
+                }
+            } else {
+                val sr = Repo.seriesOf(pickSeries!!)
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(p.soft)
+                        .clickable { steps = steps + RStep(pickSeries!!); pickSeries = null; pickOpen = false; q = "" }
+                        .padding(horizontal = 10.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.Add, null, tint = p.gold, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("أضف «${sr?.title}» كاملة", color = p.gold, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                    Text("أو اختر درساً:", color = p.muted, fontSize = 11.sp)
+                }
+                LazyColumn(Modifier.fillMaxWidth().height(220.dp).padding(top = 4.dp)) {
+                    itemsIndexed(sr?.items ?: emptyList()) { i, vid ->
+                        val vv = Repo.video(vid)
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 2.dp).clip(RoundedCornerShape(10.dp))
+                                .background(p.card).border(1.dp, p.line, RoundedCornerShape(10.dp))
+                                .clickable { steps = steps + RStep(sr!!.id, vid); pickSeries = null; pickOpen = false; q = "" }
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("${i + 1}", color = p.muted, fontSize = 11.sp, modifier = Modifier.width(20.dp))
+                            Text(vv?.title ?: vid, color = p.text, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
+                TextButton(onClick = { pickSeries = null }, modifier = Modifier.align(Alignment.CenterHorizontally)) {
+                    Text("‹ رجوع للسلاسل", color = p.muted, fontSize = 12.sp)
                 }
             }
         } else {
@@ -164,6 +203,27 @@ fun RoadmapScreen(p: Pal, ctx: android.content.Context, rmId: String, onBack: ()
         }
         itemsIndexed(rm.steps) { i, st ->
             val sr = Repo.seriesOf(st.series)
+            if (st.lesson.isNotEmpty()) {
+                val vv = Repo.video(st.lesson)
+                val lfin = vv?.let { Prefs.finished(it.id, it.duration) } == true
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(14.dp))
+                        .background(p.card).border(1.dp, if (lfin) p.gold else p.line, RoundedCornerShape(14.dp))
+                        .clickable { onLesson(st.lesson) }.padding(horizontal = 14.dp, vertical = 13.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        if (lfin) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
+                        null, tint = if (lfin) p.gold else p.muted, modifier = Modifier.size(22.dp),
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("${i + 1}. ${vv?.title ?: st.lesson}", color = p.text, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("درس مفرد — ${sr?.title ?: ""}", color = p.muted, fontSize = 12.sp)
+                    }
+                }
+                return@itemsIndexed
+            }
             val sItems = sr?.items ?: emptyList()
             val sDone = sItems.count { vid -> Repo.video(vid)?.let { Prefs.finished(vid, it.duration) } == true }
             val finished = sItems.isNotEmpty() && sDone == sItems.size
