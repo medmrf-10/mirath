@@ -12,6 +12,8 @@ import kotlinx.serialization.json.jsonPrimitive
 
 /** كتالوج مشايخ هوشات — المحتوى الكامل (تفريغ/محاذاة/ملخص/أسئلة) من ريو hawshat عبر raw.githubusercontent. */
 object Haw {
+    /** نطاق عام يبقى بعد مغادرة الشاشة — للتنزيلات الطويلة. */
+    val bg = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
     const val BASE = "https://raw.githubusercontent.com/medmrf-10/hawshat/main"
 
     private var booted = false

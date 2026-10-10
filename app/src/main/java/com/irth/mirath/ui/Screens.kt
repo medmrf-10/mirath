@@ -124,7 +124,6 @@ fun ScienceScreen(p: Pal, scienceId: String, onSeries: (String) -> Unit, onLesso
     val science = Repo.sciences?.firstOrNull { it.id == scienceId }
     val series = Repo.seriesOfScience(scienceId)
     val works = Repo.worksOfScience(scienceId)
-    val scope = rememberCoroutineScope()
     var dlMsg by remember { mutableStateOf<String?>(null) }
     var dlBusy by remember { mutableStateOf(false) }
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
@@ -140,7 +139,7 @@ fun ScienceScreen(p: Pal, scienceId: String, onSeries: (String) -> Unit, onLesso
                     TextButton(
                         onClick = {
                             dlBusy = true
-                            scope.launch {
+                            Haw.bg.launch {
                                 var done = 0; var tot = 0
                                 for (sr in series) {
                                     runCatching { Haw.ensure(sr.id) }
@@ -290,7 +289,7 @@ fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit, onExam: (
                     OutlinedButton(
                         onClick = {
                             dlBusy = true; dlMsg = null
-                            scope.launch {
+                            Haw.bg.launch {
                                 var done = 0
                                 for (vid in s.items) {
                                     runCatching { Repo.transcript(vid); Repo.summary(vid); Repo.align(vid) }
