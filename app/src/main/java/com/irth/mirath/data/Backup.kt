@@ -42,6 +42,24 @@ object Backup {
         n
     }
 
+    /** تصدير سلسلة مستخدم واحدة zip — تُستورد على جهاز آخر بنفس آلية النسخة (imports/…). */
+    suspend fun exportSeries(ctx: Context, seriesId: String, uri: Uri): Int = withContext(Dispatchers.IO) {
+        val rel = seriesId.removePrefix("L:")
+        val dir = File(ctx.filesDir, "imports/$rel")
+        if (!dir.isDirectory) return@withContext 0
+        var n = 0
+        ctx.contentResolver.openOutputStream(uri)?.use { os ->
+            ZipOutputStream(os.buffered()).use { z ->
+                dir.walkTopDown().filter { it.isFile }.forEach { f ->
+                    z.putNextEntry(ZipEntry("imports/$rel/" + f.relativeTo(dir).path))
+                    f.inputStream().use { it.copyTo(z) }
+                    z.closeEntry(); n++
+                }
+            }
+        }
+        n
+    }
+
     /** يستعيد نسخة: يستخرج imports/ وroadmaps.json ويطبّق prefs.json. يرجع عدد الملفات المستعادة. */
     suspend fun restore(ctx: Context, uri: Uri): Int = withContext(Dispatchers.IO) {
         var n = 0

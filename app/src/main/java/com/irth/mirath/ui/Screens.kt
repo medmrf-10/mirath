@@ -1,6 +1,7 @@
 package com.irth.mirath.ui
 
 import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -162,17 +163,20 @@ fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit, onExam: (
     var linkMsg by remember { mutableStateOf<String?>(null) }
     var linkBusy by remember { mutableStateOf(false) }
     val hasMedia = remember(seriesId, Prefs.srcRev.value) { LocalLib.seriesHasMedia(seriesId, s.items) }
+    // مراجعة الربط قبل التثبيت: نعرض «درس ← ملف» كاملاً فلا يُربط أعمى (بأمر محمد)
+    var linkPlan by remember { mutableStateOf<List<Pair<String, String>>?>(null) }  // (vid, اسم الملف)
+    var linkMedia by remember { mutableStateOf<List<Pair<String, Uri>>>(emptyList()) }
     val pickLink = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { u ->
         u?.let {
             scope.launch {
                 linkBusy = true
-                val n = LocalLib.autoLinkFolder(ctx, seriesId, s.items, it)
-                linkMsg = when {
-                    n > 0 -> { Prefs.setSrc(seriesId, "local"); "رُبط $n ملف وسائط — وضع «محلي» مفعّل بلا نت" }
-                    n == -1 -> "عدد ملفات المجلد لا يساوي عدد الدروس (${s.items.size})"
-                    else -> "لا ملفات وسائط في المجلد المختار"
-                }
+                val found = LocalLib.scanMediaTree(ctx, it)
                 linkBusy = false
+                when {
+                    found.isEmpty() -> linkMsg = "لا ملفات وسائط في المجلد المختار"
+                    found.size != s.items.size -> linkMsg = "عدد ملفات المجلد (${found.size}) لا يساوي عدد الدروس (${s.items.size}) — رتّب مجلدك وحدثه"
+                    else -> { linkMedia = found; linkPlan = s.items.mapIndexed { i, vid -> vid to found[i].first } }
+                }
             }
         }
     }
@@ -303,6 +307,42 @@ fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit, onExam: (
                 onClick = { onLesson(vid) },
             )
         }
+    }
+
+    // شاشة مراجعة الربط: كل درس ← ملفه قبل أي نسخ — لا ربط أعمى
+    linkPlan?.let { plan ->
+        AlertDialog(
+            onDismissRequest = { linkPlan = null },
+            containerColor = p.card,
+            title = { Text("راجِع الربط — ${plan.size} درساً ← ${plan.size} ملفاً", color = p.text, fontSize = 15.sp) },
+            text = {
+                LazyColumn(Modifier.heightIn(max = 340.dp)) {
+                    itemsIndexed(plan) { i, pair ->
+                        Row(Modifier.fillMaxWidth().padding(vertical = 5.dp)) {
+                            Text("${i + 1}.", color = p.gold, fontSize = 12.sp, modifier = Modifier.width(24.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(Repo.video(pair.first)?.title ?: pair.first, color = p.text, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("← ${pair.second}", color = p.muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val m = linkMedia
+                    scope.launch {
+                        linkBusy = true
+                        val n = LocalLib.applyLink(ctx, s.items, m)
+                        linkBusy = false
+                        linkPlan = null
+                        if (n > 0) { Prefs.setSrc(seriesId, "local"); linkMsg = "رُبط $n ملف — «محلي» مفعّل بلا نت" }
+                        else linkMsg = "تعذّر الربط"
+                    }
+                }) { Text("ثبّت الربط", color = p.gold) }
+            },
+            dismissButton = { TextButton(onClick = { linkPlan = null }) { Text("إلغاء", color = p.muted) } },
+        )
     }
 }
 

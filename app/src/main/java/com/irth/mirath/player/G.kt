@@ -43,7 +43,8 @@ object G {
 <body><div id="p"></div><script>
 var pl;window.ct=0;window.ps=-1;
 function onYouTubeIframeAPIReady(){pl=new YT.Player('p',{playerVars:{rel:0,playsinline:1,enablejsapi:1},
-events:{onStateChange:function(e){window.ps=e.data;}}});}
+events:{onReady:function(){if(window.__pend){loadVid(window.__pend.id,window.__pend.st);window.__pend=null}},
+onStateChange:function(e){window.ps=e.data;}}});}
 window.loadVid=function(id,st){try{pl.loadVideoById({videoId:id,startSeconds:st})}catch(e){}};
 setInterval(function(){try{if(pl&&pl.getCurrentTime)window.ct=pl.getCurrentTime()}catch(e){}},200);
 </script><script src="https://www.youtube.com/iframe_api"></script></body></html>"""
@@ -123,7 +124,8 @@ setInterval(function(){try{if(pl&&pl.getCurrentTime)window.ct=pl.getCurrentTime(
             runCatching { mp?.pause() }
             local = false
             ensureWeb(ctx)
-            webView?.evaluateJavascript("try{pl?loadVid('$ytId',$startSec):(window.__pend={id:'$ytId',st:$startSec});if(pl&&!window.__hook){window.__hook=1;var o=onYouTubeIframeAPIReady;onYouTubeIframeAPIReady=function(){o();if(window.__pend){loadVid(window.__pend.id,window.__pend.st);window.__pend=null}}}catch(e){}", null)
+            // pl قد لا يكون جاهزاً بعد — __pend يلتقطه onReady داخل الصفحة
+            webView?.evaluateJavascript("try{pl&&pl.loadVideoById?loadVid('$ytId',$startSec):(window.__pend={id:'$ytId',st:$startSec})}catch(e){window.__pend={id:'$ytId',st:$startSec}}", null)
         }
         if (speed != 1.0) { val r = speed; handler.postDelayed({ setRate(r) }, 900) }
         ctx.startForegroundService(svc)

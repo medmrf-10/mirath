@@ -8,7 +8,11 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 
 /**
@@ -148,29 +152,29 @@ object LocalLib {
     private fun naturalKey(name: String): String =
         name.lowercase().replace(Regex("\\d+")) { it.value.padStart(8, '0') }
 
-    /**
-     * الأوفلاين بالعدد (بأمر محمد): اختيار مجلد فيه وسائط مساوية عدد دروس السلسلة ← ربط آلي بالترتيب.
-     * يعيد: n مرتبطة | 0 لا وسائط | -1 عدد غير مطابق.
-     */
-    suspend fun autoLinkFolder(ctx: Context, seriesId: String, items: List<String>, uri: Uri): Int = withContext(Dispatchers.IO) {
-        val doc = DocumentFile.fromTreeUri(ctx, uri) ?: return@withContext 0
+    /** فحص مجلد وسائط: (اسم الملف، URI) مرتبة بالترتيب الطبيعي — مرحلة المراجعة قبل الربط. */
+    suspend fun scanMediaTree(ctx: Context, uri: Uri): List<Pair<String, Uri>> = withContext(Dispatchers.IO) {
+        val doc = DocumentFile.fromTreeUri(ctx, uri) ?: return@withContext emptyList()
         val media = mutableListOf<DocumentFile>()
         fun walk(d: DocumentFile) {
             d.listFiles().forEach { if (it.isDirectory) walk(it) else if (isMediaName(it.name ?: "")) media += it }
         }
         walk(doc)
-        if (media.isEmpty()) return@withContext 0
         media.sortBy { naturalKey(it.name ?: "") }
-        if (media.size != items.size) return@withContext -1
+        media.map { (it.name ?: "media") to it.uri }
+    }
+
+    /** تثبيت الربط بعد مراجعة المستخدم: ينسخ كل وسائط إلى درسها بالترتيب. يعيد عدد المنسوخة. */
+    suspend fun applyLink(ctx: Context, items: List<String>, media: List<Pair<String, Uri>>): Int = withContext(Dispatchers.IO) {
         var n = 0
         items.forEachIndexed { i, vid ->
-            val f = media[i]
-            val ext = (f.name ?: "media.mp3").substringAfterLast('.')
+            val (name, u) = media[i]
+            val ext = name.substringAfterLast('.', "mp3").lowercase()
             val out = if (vid.startsWith("L:")) File(root, "${vid.removePrefix("L:")}/media.$ext")
                       else File(linkDir(vid), "media.$ext")
             out.parentFile?.mkdirs()
             runCatching {
-                ctx.contentResolver.openInputStream(f.uri)?.use { ins -> out.outputStream().use { ins.copyTo(it) } }
+                ctx.contentResolver.openInputStream(u)?.use { ins -> out.outputStream().use { ins.copyTo(it) } }
                 n++
             }
         }
@@ -395,18 +399,81 @@ object LocalLib {
     /**
      * جلب قائمة يوتيوب: (عنوان القائمة، [(ytId, عنوان الحلقة) بالترتيب]).
      * يُستخدم في شاشة الإنشاء — المستخدم يعدّل العناوين والترتيب قبل الحفظ.
+     * يوتيوب لم يعد يرسل العناصر في HTML الصفحة — نجلبها من واجهة youtubei/v1/browse
+     * (نفس ما يفعله متصفحك) ثم نمشي على صفحات المتابعة حتى نفادها.
      */
     suspend fun fetchPlaylist(text: String): Pair<String, List<Pair<String, String>>> = withContext(Dispatchers.IO) {
         val pl = playlistOf(text); if (pl.isEmpty()) return@withContext ("" to emptyList())
         runCatching {
-            val html = java.net.URL("https://www.youtube.com/playlist?list=$pl").readText()
+            val html = httpGet("https://www.youtube.com/playlist?list=$pl")
+            val key = Regex("\"INNERTUBE_API_KEY\":\"([\\w-]+)\"").find(html)?.groupValues?.get(1) ?: return@runCatching ("" to emptyList())
+            val ver = Regex("\"INNERTUBE_CONTEXT_CLIENT_VERSION\":\"([\\d.]+)\"").find(html)?.groupValues?.get(1) ?: "2.20250101.01.00"
             val plTitle = Regex("<title>(.+?)</title>").find(html)?.groupValues?.get(1)
                 ?.replace(Regex(" - YouTube$"), "")?.trim() ?: ""
-            val pat = Regex("\"videoId\":\"([\\w-]{11})\".{0,500}?\"title\":\\{\"runs\":\\[\\{\"text\":\"(.+?)\"", RegexOption.DOT_MATCHES_ALL)
-            val items = pat.findAll(html).map { it.groupValues[1] to unesc(it.groupValues[2]) }
-                .distinctBy { it.first }.toList()
-            plTitle to items
+            val items = linkedMapOf<String, String>()
+            var extra = "\"browseId\":\"VL$pl\""
+            var pages = 0
+            while (pages < 12) {
+                pages++
+                val resp = httpPost("https://www.youtube.com/youtubei/v1/browse?key=$key",
+                    "{\"context\":{\"client\":{\"clientName\":\"WEB\",\"clientVersion\":\"$ver\",\"hl\":\"ar\"}},$extra}")
+                val j = runCatching { Api.json.parseToJsonElement(resp) }.getOrNull() ?: break
+                walkLockups(j, items)
+                val cont = findCont(j) ?: break
+                if (cont.isEmpty()) break
+                extra = "\"continuation\":\"$cont\""
+            }
+            plTitle to items.toList()
         }.getOrDefault("" to emptyList())
+    }
+
+    private fun httpGet(url: String): String {
+        val c = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+        c.setRequestProperty("User-Agent", "Mozilla/5.0")
+        c.connectTimeout = 15000; c.readTimeout = 20000
+        return c.inputStream.readBytes().toString(Charsets.UTF_8)
+    }
+
+    private fun httpPost(url: String, body: String): String {
+        val c = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+        c.requestMethod = "POST"
+        c.setRequestProperty("Content-Type", "application/json")
+        c.setRequestProperty("User-Agent", "Mozilla/5.0")
+        c.connectTimeout = 15000; c.readTimeout = 20000
+        c.doOutput = true
+        c.outputStream.use { it.write(body.toByteArray()) }
+        return c.inputStream.readBytes().toString(Charsets.UTF_8)
+    }
+
+    private fun walkLockups(el: JsonElement, out: MutableMap<String, String>) {
+        when (el) {
+            is JsonObject -> {
+                (el["lockupViewModel"] as? JsonObject)?.let { v ->
+                    val cid = (v["contentId"] as? JsonElement)?.jsonPrimitive?.contentOrNull
+                    if (cid != null && cid.length == 11 && !out.containsKey(cid)) {
+                        val t = (((v["metadata"] as? JsonObject)?.get("lockupMetadataViewModel") as? JsonObject)
+                            ?.get("title") as? JsonObject)?.get("content")?.jsonPrimitive?.contentOrNull ?: ""
+                        out[cid] = t
+                    }
+                }
+                el.values.forEach { walkLockups(it, out) }
+            }
+            is JsonArray -> el.forEach { walkLockups(it, out) }
+            else -> {}
+        }
+    }
+
+    private fun findCont(el: JsonElement): String? {
+        when (el) {
+            is JsonObject -> {
+                (((el["continuationCommand"] as? JsonObject)?.get("token")) as? JsonElement)
+                    ?.jsonPrimitive?.contentOrNull?.let { return it }
+                el.values.forEach { findCont(it)?.let { r -> return r } }
+            }
+            is JsonArray -> el.forEach { findCont(it)?.let { r -> return r } }
+            else -> {}
+        }
+        return null
     }
 
     private fun unesc(s: String): String = s

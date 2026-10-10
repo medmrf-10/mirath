@@ -23,6 +23,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.irth.mirath.data.Backup
 import com.irth.mirath.data.LocalLib
 import com.irth.mirath.ui.theme.Pal
 import kotlinx.coroutines.launch
@@ -230,6 +231,14 @@ fun EditSeriesSheet(p: Pal, seriesId: String, onDone: () -> Unit) {
             }
         }
     }
+    val exportZip = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { u ->
+        u?.let {
+            scope.launch {
+                val n = Backup.exportSeries(ctx, seriesId, it)
+                msg = if (n > 0) "صُدّرت السلسلة ($n ملفاً) — شاركها مع من تريد، ويستوردها بنفس آلية الاستيراد" else "لا ملفات للتصدير"
+            }
+        }
+    }
 
     Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp)) {
         Text("تحرير السلسلة", color = p.text, fontWeight = FontWeight.Bold, fontSize = 17.sp)
@@ -243,6 +252,20 @@ fun EditSeriesSheet(p: Pal, seriesId: String, onDone: () -> Unit) {
         LessonEditor(p, items, attachPick = { attachIdx = it; pickAttach.launch(arrayOf("*/*")) })
         msg?.let { Text(it, color = p.gold, fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp)) }
         Spacer(Modifier.height(12.dp))
+        OutlinedButton(
+            onClick = {
+                val safe = seriesId.removePrefix("L:").substringAfterLast('/').replace(Regex("[^\\w\\u0600-\\u06FF-]"), "_")
+                exportZip.launch("mirath-$safe.zip")
+            },
+            modifier = Modifier.fillMaxWidth().height(38.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = p.gold),
+        ) {
+            Icon(Icons.Filled.Share, null, modifier = Modifier.size(15.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("صدّر هذه السلسلة zip — شاركها أو احفظها", fontSize = 12.sp)
+        }
+        Spacer(Modifier.height(10.dp))
         Row(Modifier.fillMaxWidth()) {
             OutlinedButton(
                 onClick = { confirmDel = true },
