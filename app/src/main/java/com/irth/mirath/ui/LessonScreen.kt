@@ -70,6 +70,7 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
     var spdI by remember { mutableStateOf(0) }
     var slpI by remember { mutableStateOf(-1) }
     var showDrawer by remember { mutableStateOf(false) }
+    var query by remember { mutableStateOf("") }
     val ctl = G  // مقبض المشغّل العالمي — نفس عقد YtCtl أسمائياً
     val scope = rememberCoroutineScope()
     val ser = remember(videoId) { Repo.series?.firstOrNull { it.items.contains(videoId) } }
@@ -128,6 +129,8 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
                 ctx.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://youtu.be/${v.yt}")))
             }
             MTab(p, Icons.Outlined.FormatListBulleted, "الدروس", false) { showDrawer = true }
+            if (v.has.contains("align") || v.has.contains("transcript"))
+                MTab(p, Icons.Outlined.Search, "بحث", mode == "find") { mode = "find" }
         }
 
         when (mode) {
@@ -249,6 +252,69 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
                             Row(Modifier.padding(top = 10.dp)) {
                                 Text("•", color = p.gold, modifier = Modifier.padding(end = 8.dp))
                                 Text(pt, color = p.muted, style = MaterialTheme.typography.bodyLarge)
+                            }
+                        }
+                    }
+                }
+            }
+            "find" -> Column(Modifier.fillMaxSize().padding(16.dp)) {
+                OutlinedTextField(
+                    value = query, onValueChange = { query = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("ابحث في نص الدرس…", color = p.muted) },
+                    singleLine = true,
+                    textStyle = TextStyle(color = p.text, fontSize = 15.sp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = p.gold, unfocusedBorderColor = p.line,
+                        cursorColor = p.gold,
+                        focusedContainerColor = p.card, unfocusedContainerColor = p.card,
+                    ),
+                    trailingIcon = {
+                        if (query.isNotEmpty()) IconButton(onClick = { query = "" }) {
+                            Icon(Icons.Filled.Close, "مسح", tint = p.muted, modifier = Modifier.size(18.dp))
+                        }
+                    },
+                )
+                Spacer(Modifier.height(10.dp))
+                val q = query.trim()
+                LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    when {
+                        q.length < 2 -> item {
+                            Text("اكتب كلمتين فأكثر — النتيجة تقفز بالصوت لموضعها", color = p.muted, fontSize = 13.sp)
+                        }
+                        phrases.isNotEmpty() -> {
+                            val hits = phrases.filter { ph -> ph.joinToString(" ") { it.w }.contains(q) }
+                            if (hits.isEmpty()) item { Text("لا نتائج لـ«$q»", color = p.muted, fontSize = 13.sp) }
+                            itemsIndexed(hits.take(60)) { _, ph ->
+                                Row(
+                                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(p.card)
+                                        .clickable { ctl.seek(ph.first().s - 0.05); mode = "live" }
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(fmtT(ph.first().s), color = p.gold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    Spacer(Modifier.width(10.dp))
+                                    Text(ph.joinToString(" ") { it.w }, color = p.text, fontSize = 14.sp, maxLines = 2)
+                                }
+                            }
+                        }
+                        else -> {
+                            val t = transcript.orEmpty()
+                            val ats = Regex(Regex.escape(q)).findAll(t).map { it.range.first }.toList()
+                            if (ats.isEmpty()) item { Text("لا نتائج لـ«$q»", color = p.muted, fontSize = 13.sp) }
+                            itemsIndexed(ats.take(40)) { _, at ->
+                                val from = (at - 55).coerceAtLeast(0)
+                                val to = (at + q.length + 65).coerceAtMost(t.length)
+                                Row(
+                                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(p.card)
+                                        .clickable { mode = "read" }
+                                        .padding(12.dp),
+                                ) {
+                                    Text(
+                                        "…" + t.substring(from, to).replace('\n', ' ') + "…",
+                                        color = p.text, fontSize = 13.sp, maxLines = 3,
+                                    )
+                                }
                             }
                         }
                     }
