@@ -61,6 +61,7 @@ import kotlinx.serialization.Serializable
 @Serializable data class SeriesR(val id: String)
 @Serializable data class LessonR(val id: String)
 @Serializable data class RoadmapR(val id: String)
+@Serializable data class ExamR(val seriesId: String)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -123,7 +124,7 @@ fun MirathApp() {
                         p, title,
                         onTheme = { showTheme = true },
                         onSearch = { showSearch = true },
-                        onBack = if (route.contains("ScienceR") || route.contains("SeriesR") || route.contains("LessonR") || route.contains("RoadmapR")) {
+                        onBack = if (route.contains("ScienceR") || route.contains("SeriesR") || route.contains("LessonR") || route.contains("RoadmapR") || route.contains("ExamR")) {
                             { nav.popBackStack() }
                         } else null,
                     )
@@ -220,7 +221,11 @@ fun MirathApp() {
                         }
                         composable<SeriesR> { e ->
                             val r = e.toRoute<SeriesR>()
-                            SeriesScreen(p, r.id) { nav.navigate(LessonR(it)) }
+                            SeriesScreen(p, r.id, onLesson = { nav.navigate(LessonR(it)) }, onExam = { nav.navigate(ExamR(it)) })
+                        }
+                        composable<ExamR> { e ->
+                            val r = e.toRoute<ExamR>()
+                            ExamScreen(p, r.seriesId) { nav.popBackStack() }
                         }
                         composable<LessonR> { e ->
                             val r = e.toRoute<LessonR>()

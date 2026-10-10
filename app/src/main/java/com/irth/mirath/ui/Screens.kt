@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.outlined.Quiz
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -33,6 +34,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.irth.mirath.data.LocalLib
+import com.irth.mirath.data.QA
 import com.irth.mirath.data.Repo
 import com.irth.mirath.store.Prefs
 import com.irth.mirath.ui.theme.Pal
@@ -151,7 +153,7 @@ fun ScienceScreen(p: Pal, scienceId: String, onSeries: (String) -> Unit, onLesso
 }
 
 @Composable
-fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit) {
+fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit, onExam: (String) -> Unit = {}) {
     val s = Repo.seriesOf(seriesId)
     if (s == null) { EmptyBox(p, "السلسلة غير موجودة"); return }
     val ctx = LocalContext.current
@@ -241,6 +243,20 @@ fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit) {
             }
             if (linkBusy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 6.dp), color = p.gold, trackColor = p.soft)
             linkMsg?.let { Text(it, color = p.gold, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp)) }
+            // اختبار السلسلة — يجمع أسئلة كل دروسها في امتحان واحد
+            if (s.items.any { Repo.video(it)?.has?.contains("questions") == true }) {
+                OutlinedButton(
+                    onClick = { onExam(seriesId) },
+                    modifier = Modifier.fillMaxWidth().height(42.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = p.gold),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, p.line),
+                ) {
+                    Icon(Icons.Outlined.Quiz, null, tint = p.gold, modifier = Modifier.size(17.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("اختبار السلسلة — أسئلة من كل دروسها", fontSize = 13.sp)
+                }
+            }
         }
         itemsIndexed(s.items) { i, vid ->
             val v = Repo.video(vid) ?: return@itemsIndexed
@@ -437,5 +453,38 @@ fun SearchSheet(p: Pal, onLesson: (String) -> Unit, onSeries: (String) -> Unit, 
                 }
             }
         }
+    }
+}
+
+/** اختبار السلسلة: يجمع أسئلة كل دروسها، يسحب حتى 15 سؤالاً عشوائياً، ويشغّل وضع الاختبار نفسه. */
+@Composable
+fun ExamScreen(p: Pal, seriesId: String, onBack: () -> Unit) {
+    val s = Repo.seriesOf(seriesId)
+    var qs by remember { mutableStateOf<List<QA>?>(null) }
+    var loadN by remember { mutableStateOf(0) }
+    LaunchedEffect(seriesId) {
+        if (s == null) { qs = emptyList(); return@LaunchedEffect }
+        val pool = mutableListOf<QA>()
+        s.items.forEach { vid ->
+            if (Repo.video(vid)?.has?.contains("questions") == true) {
+                runCatching { pool += Repo.questions(vid) }
+            }
+            loadN++
+        }
+        qs = pool.shuffled().take(15)
+    }
+    when {
+        s == null -> EmptyBox(p, "السلسلة غير موجودة")
+        qs == null -> Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Spacer(Modifier.weight(1f))
+            CircularProgressIndicator(color = p.gold)
+            Text("يجمع أسئلة السلسلة… ($loadN/${s.items.size})", color = p.muted, modifier = Modifier.padding(top = 12.dp))
+            Spacer(Modifier.weight(1f))
+        }
+        qs!!.isEmpty() -> Column(Modifier.fillMaxSize().padding(24.dp)) {
+            EmptyBox(p, "لا أسئلة في دروس هذه السلسلة بعد")
+            Button(onClick = onBack, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = p.primary)) { Text("رجوع") }
+        }
+        else -> QuizMode(p, "EXAM:$seriesId", qs!!, onBack)
     }
 }

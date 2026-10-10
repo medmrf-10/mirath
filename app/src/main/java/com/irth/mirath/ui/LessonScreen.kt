@@ -591,7 +591,7 @@ fun GSurface(local: Boolean, p: Pal) {
 
 /** وضع الاختبار: بطاقة واحدة — سؤال، كشف الجواب، تقييم ذاتي (أصبت/أخطأت)، ثم نتيجة تحفظ أفضل محاولة. */
 @Composable
-private fun QuizMode(p: Pal, videoId: String, qs: List<QA>, onExit: () -> Unit) {
+fun QuizMode(p: Pal, videoId: String, qs: List<QA>, onExit: () -> Unit) {
     var idx by remember { mutableStateOf(0) }
     var revealed by remember { mutableStateOf(false) }
     var right by remember { mutableStateOf(0) }
