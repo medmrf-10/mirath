@@ -337,7 +337,7 @@ fun FavScreen(p: Pal, onLesson: (String) -> Unit) {
 }
 
 @Composable
-fun StatsScreen(p: Pal) {
+fun StatsScreen(p: Pal, onLesson: (String) -> Unit = {}) {
     val vids = Repo.videos ?: emptyList()
     val opened = Prefs.openedCount()
     val fin = vids.count { Prefs.finished(it.id, it.duration) }
@@ -359,6 +359,30 @@ fun StatsScreen(p: Pal) {
             StatRow(p, "قيد المشاهدة", "$ong", if (total > 0) ong.toFloat() / total else 0f)
             StatRow(p, "دروس أتممتها", "$fin", if (total > 0) fin.toFloat() / total else 0f)
             StatRow(p, "مفضلاتك", "$fav")
+            val bms = remember(Prefs.bmRev.value) {
+                Prefs.allBookmarks().entries
+                    .flatMap { (vid, l) -> l.map { vid to it } }
+                    .sortedByDescending { it.second.t }
+            }
+            if (bms.isNotEmpty()) {
+                StatRow(p, "علاماتك", "${bms.size}")
+                bms.forEach { (vid, b) ->
+                    val vv = Repo.video(vid)
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(10.dp))
+                            .background(p.card).border(1.dp, p.line, RoundedCornerShape(10.dp))
+                            .clickable { onLesson(vid) }.padding(horizontal = 10.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(fmtDur(b.s), color = p.gold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(vv?.title ?: vid, color = p.text, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (b.n.isNotEmpty()) Text(b.n, color = p.muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+            }
         }
     }
 }

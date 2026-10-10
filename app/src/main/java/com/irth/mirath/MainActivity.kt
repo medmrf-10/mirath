@@ -214,7 +214,7 @@ fun MirathApp() {
                         }
                         composable<Fav> { FavScreen(p) { id -> nav.navigate(LessonR(id)) } }
                         composable<Lib> { LibraryScreen(p, onSeries = { nav.navigate(SeriesR(it)) }, onRoadmap = { nav.navigate(RoadmapR(it)) }) }
-                        composable<Stats> { StatsScreen(p) }
+                        composable<Stats> { StatsScreen(p, onLesson = { nav.navigate(LessonR(it)) }) }
                         composable<ScienceR> { e ->
                             val r = e.toRoute<ScienceR>()
                             ScienceScreen(p, r.id, onSeries = { nav.navigate(SeriesR(it)) }, onLesson = { nav.navigate(LessonR(it)) })
