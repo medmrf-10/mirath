@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.FormatListBulleted
@@ -169,6 +170,8 @@ fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit, onExam: (
     // مراجعة الربط قبل التثبيت: نعرض «درس ← ملف» كاملاً فلا يُربط أعمى (بأمر محمد)
     var linkPlan by remember { mutableStateOf<List<Pair<String, String>>?>(null) }  // (vid, اسم الملف)
     var linkMedia by remember { mutableStateOf<List<Pair<String, Uri>>>(emptyList()) }
+    var dlBusy by remember { mutableStateOf(false) }
+    var dlMsg by remember { mutableStateOf<String?>(null) }
     val pickLink = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { u ->
         u?.let {
             scope.launch {
@@ -246,6 +249,28 @@ fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit, onExam: (
                     enabled = !linkBusy,
                     contentPadding = PaddingValues(0.dp),
                 ) { Icon(Icons.Filled.Link, "اربط مجلد أوفلاين", tint = if (hasMedia) p.gold else p.muted, modifier = Modifier.size(18.dp)) }
+                if (seriesId.startsWith("H:")) {
+                    Spacer(Modifier.width(8.dp))
+                    OutlinedButton(
+                        onClick = {
+                            dlBusy = true; dlMsg = null
+                            scope.launch {
+                                var done = 0
+                                for (vid in s.items) {
+                                    runCatching { Repo.transcript(vid); Repo.summary(vid); Repo.align(vid) }
+                                    done++; dlMsg = "نزّل $done/${s.items.size}"
+                                }
+                                dlBusy = false
+                                dlMsg = "متاحة بلا نت (${s.items.size} درساً)"
+                            }
+                        },
+                        modifier = Modifier.size(44.dp), shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = p.muted),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, p.soft),
+                        enabled = !dlBusy,
+                        contentPadding = PaddingValues(0.dp),
+                    ) { Icon(Icons.Filled.Download, "نزّل طبقات السلسلة للأوفلاين", tint = p.muted, modifier = Modifier.size(18.dp)) }
+                }
                 Spacer(Modifier.width(8.dp))
                 OutlinedButton(
                     onClick = {
@@ -261,8 +286,9 @@ fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit, onExam: (
                     contentPadding = PaddingValues(0.dp),
                 ) { Icon(Icons.Filled.Share, "مشاركة السلسلة", tint = p.muted, modifier = Modifier.size(18.dp)) }
             }
-            if (linkBusy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 6.dp), color = p.gold, trackColor = p.soft)
+            if (linkBusy || dlBusy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 6.dp), color = p.gold, trackColor = p.soft)
             linkMsg?.let { Text(it, color = p.gold, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp)) }
+            dlMsg?.let { Text(it, color = p.gold, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp)) }
             // اختبار السلسلة — يجمع أسئلة كل دروسها في امتحان واحد
             if (s.items.any { Repo.video(it)?.has?.contains("questions") == true }) {
                 OutlinedButton(
