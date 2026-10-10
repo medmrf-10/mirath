@@ -57,6 +57,7 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
     val ctx = LocalContext.current
 
     var mode by remember { mutableStateOf("live") }
+    var quizOn by remember { mutableStateOf(false) }
     var words by remember { mutableStateOf<List<AWord>?>(null) }
     var phrases by remember { mutableStateOf<List<List<AWord>>>(emptyList()) }
     var noAlign by remember { mutableStateOf(false) }
@@ -332,12 +333,27 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
                     }
                 }
             }
-            "qu" -> LazyColumn(Modifier.fillMaxSize()) {
+            "qu" -> {
                 val qs = questions
-                if (qs == null) item { LoadingBox(p) }
-                else {
-                    itemsIndexed(qs) { i, qa -> QCard(p, videoId, i, qa) }
-                    item { Spacer(Modifier.height(40.dp)) }
+                when {
+                    qs == null -> LazyColumn(Modifier.fillMaxSize()) { item { LoadingBox(p) } }
+                    quizOn -> QuizMode(p, videoId, qs) { quizOn = false }
+                    else -> LazyColumn(Modifier.fillMaxSize()) {
+                        item {
+                            Row(
+                                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    Prefs.str("quiz.best.$videoId").takeIf { it.isNotEmpty() }?.let { "أفضل اختبار: $it" } ?: "${qs.size} سؤالاً",
+                                    color = p.muted, fontSize = 12.sp, modifier = Modifier.weight(1f),
+                                )
+                                MTab(p, Icons.Outlined.Quiz, "اختبر نفسك", false) { quizOn = true }
+                            }
+                        }
+                        itemsIndexed(qs) { i, qa -> QCard(p, videoId, i, qa) }
+                        item { Spacer(Modifier.height(40.dp)) }
+                    }
                 }
             }
         }
@@ -570,5 +586,102 @@ fun GSurface(local: Boolean, p: Pal) {
             },
             modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(16.dp)).background(androidx.compose.ui.graphics.Color.Black),
         )
+    }
+}
+
+/** وضع الاختبار: بطاقة واحدة — سؤال، كشف الجواب، تقييم ذاتي (أصبت/أخطأت)، ثم نتيجة تحفظ أفضل محاولة. */
+@Composable
+private fun QuizMode(p: Pal, videoId: String, qs: List<QA>, onExit: () -> Unit) {
+    var idx by remember { mutableStateOf(0) }
+    var revealed by remember { mutableStateOf(false) }
+    var right by remember { mutableStateOf(0) }
+    var done by remember { mutableStateOf(false) }
+    val total = qs.size
+
+    fun advance(hit: Boolean) {
+        if (hit) right++
+        if (idx >= total - 1) {
+            done = true
+            val score = right + if (hit) 1 else 0
+            val best = Prefs.str("quiz.best.$videoId")
+                .split("/").mapNotNull { it.toIntOrNull() }
+            if (best.size != 2 || score * best[1] > best[0] * total)
+                Prefs.putStr("quiz.best.$videoId", "$score/$total")
+        } else { idx++; revealed = false }
+    }
+
+    Column(Modifier.fillMaxSize().padding(16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Text("اختبر نفسك", color = p.gold, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            Text(if (done) "انتهى الاختبار" else "س ${idx + 1}/$total · صح $right", color = p.muted, fontSize = 13.sp)
+            IconButton(onClick = onExit) { Icon(Icons.Filled.Close, "إنهاء", tint = p.muted) }
+        }
+        LinearProgressIndicator(
+            progress = { if (done) 1f else idx.toFloat() / total },
+            modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp).height(4.dp).clip(RoundedCornerShape(4.dp)),
+            color = p.gold, trackColor = p.line,
+        )
+        if (!done) {
+            val qa = qs[idx]
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(p.card)
+                    .border(1.dp, p.line, RoundedCornerShape(16.dp)).padding(18.dp),
+            ) {
+                Text("س ${idx + 1}:", color = p.gold, style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(6.dp))
+                Text(qa.q, color = p.text, style = MaterialTheme.typography.bodyLarge)
+                if (!revealed) {
+                    Button(
+                        onClick = { revealed = true },
+                        modifier = Modifier.fillMaxWidth().padding(top = 16.dp).height(46.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = p.soft, contentColor = p.text),
+                    ) { Text("أظهر الجواب") }
+                } else {
+                    Divider(color = p.line, modifier = Modifier.padding(vertical = 12.dp))
+                    Text(qa.a, color = p.muted, style = MaterialTheme.typography.bodyLarge)
+                    Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        OutlinedButton(
+                            onClick = { advance(false) },
+                            modifier = Modifier.weight(1f).height(46.dp), shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = p.muted),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, p.line),
+                        ) { Text("أخطأت") }
+                        Button(
+                            onClick = { advance(true) },
+                            modifier = Modifier.weight(1f).height(46.dp), shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = p.gold, contentColor = Color.Black),
+                        ) { Text("أصبت") }
+                    }
+                }
+            }
+        } else {
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(p.card)
+                    .border(1.dp, p.gold, RoundedCornerShape(16.dp)).padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text("$right / $total", color = p.gold, fontSize = 34.sp, fontWeight = FontWeight.Bold)
+                Text("إجابات صحيحة", color = p.muted, fontSize = 13.sp)
+                Text(
+                    "أفضل نتيجة: ${Prefs.str("quiz.best.$videoId")}",
+                    color = p.muted, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp),
+                )
+                Row(Modifier.fillMaxWidth().padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedButton(
+                        onClick = { idx = 0; revealed = false; right = 0; done = false },
+                        modifier = Modifier.weight(1f).height(44.dp), shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = p.text),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, p.line),
+                    ) { Text("أعد الاختبار") }
+                    Button(
+                        onClick = onExit,
+                        modifier = Modifier.weight(1f).height(44.dp), shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = p.primary),
+                    ) { Text("للأسئلة") }
+                }
+            }
+        }
+        Spacer(Modifier.weight(1f))
     }
 }
