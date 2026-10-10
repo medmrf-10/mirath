@@ -282,6 +282,27 @@ object LocalLib {
         uris.forEach { u ->
             val d = DocumentFile.fromSingleUri(ctx, u) ?: return@forEach
             val name = d.name ?: return@forEach
+            if (name.lowercase().endsWith(".zip")) {
+                // حزمة مضغوطة (نسخة احتياطية أو سلسلة مشاركة) — استخرج بالبنية كما هي
+                runCatching {
+                    ctx.contentResolver.openInputStream(u)?.use { ins ->
+                        java.util.zip.ZipInputStream(ins.buffered()).use { z ->
+                            var e = z.nextEntry
+                            while (e != null) {
+                                val rel = e.name.removePrefix("imports/").trimStart('/')
+                                if (!e.isDirectory && rel.isNotBlank() && !rel.contains("..")) {
+                                    val out = File(root, rel)
+                                    out.parentFile?.mkdirs()
+                                    out.outputStream().use { z.copyTo(it) }
+                                    n++
+                                }
+                                z.closeEntry(); e = z.nextEntry
+                            }
+                        }
+                    }
+                }
+                return@forEach
+            }
             val (key, canon) = classify(name)
             val out = File(root, "وارد/$key/$canon")
             out.parentFile?.mkdirs()
