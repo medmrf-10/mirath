@@ -276,7 +276,8 @@ fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit, onExam: (
                     onClick = {
                         val send = Intent(Intent.ACTION_SEND).apply {
                             type = "text/plain"
-                            putExtra(Intent.EXTRA_TEXT, "${s.title} — إرث\nhttps://medmrf-10.github.io/irth/#/series/$seriesId")
+                            val shareUrl = if (seriesId.startsWith("H:")) "https://medmrf-10.github.io/hawshat/playlists/d.html?s=${seriesId.removePrefix("H:")}" else "https://medmrf-10.github.io/irth/#/series/$seriesId"
+                            putExtra(Intent.EXTRA_TEXT, "${s.title} — إرث\n$shareUrl")
                         }
                         ctx.startActivity(Intent.createChooser(send, "مشاركة السلسلة"))
                     },

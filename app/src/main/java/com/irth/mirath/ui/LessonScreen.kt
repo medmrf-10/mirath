@@ -228,7 +228,10 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
                             }
                             IconBtn(p, Icons.Filled.Share, false) {
                                 val t = pos.toInt()
-                                val url = "https://medmrf-10.github.io/irth/#/lesson/$videoId" + if (t > 10) "?t=$t" else ""
+                                val url = if (videoId.startsWith("H:")) {
+                                    val hp = videoId.removePrefix("H:").split(":")
+                                    "https://medmrf-10.github.io/hawshat/playlists/d.html?s=${hp[0]}&l=${hp.getOrElse(1) { "1" }.toIntOrNull() ?: 1}"
+                                } else "https://medmrf-10.github.io/irth/#/lesson/$videoId" + if (t > 10) "?t=$t" else ""
                                 val send = Intent(Intent.ACTION_SEND).apply {
                                     type = "text/plain"
                                     putExtra(Intent.EXTRA_TEXT, "${v.title} — إرث" + (if (t > 10) " (من ${fmtT(t.toDouble())})" else "") + "\n$url")
