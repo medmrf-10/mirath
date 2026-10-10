@@ -10,8 +10,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.CreateNewFolder
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.outlined.AudioFile
 import androidx.compose.material3.*
@@ -29,9 +32,10 @@ import com.irth.mirath.ui.theme.Pal
 import kotlinx.coroutines.launch
 
 /**
- * مكتبتي — المكتبة المحلية: استيراد ملفات الدروس من الهاتف (التفريغ/المحاذاة/الملخصات/الأسئلة/الوسائط)
- * التي ينتجها وكيل التفريغ المعيّن، ثم تصفّحها كسلاسل تُشغَّل دون اتصال.
+ * مكتبتي — سلاسل المستخدم: ينشئها بنفسه (يدوياً أو من قائمة يوتيوب)، يرتّبها في مجلدات،
+ * يستورد حزم الوكيل والملفات المفردة، ويشغّلها بلا إنترنت.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(p: Pal, onSeries: (String) -> Unit) {
     val ctx = LocalContext.current
@@ -39,6 +43,9 @@ fun LibraryScreen(p: Pal, onSeries: (String) -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf<String?>(null) }
     var rev by remember { mutableStateOf(0) }
+    var showCreate by remember { mutableStateOf(false) }
+    var createUrl by remember { mutableStateOf("") }
+    var editId by remember { mutableStateOf<String?>(null) }
     val local = remember(rev) { LocalLib.localSeries() }
 
     fun after(n: Int) {
@@ -55,15 +62,22 @@ fun LibraryScreen(p: Pal, onSeries: (String) -> Unit) {
 
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         item {
+            // إنشاء سلسلة — الإجراء الرئيسي (منصة عامة: المستخدم يبني مكتبته)
+            Button(
+                onClick = { createUrl = ""; showCreate = true },
+                modifier = Modifier.fillMaxWidth().padding(top = 16.dp).height(52.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = p.primary),
+            ) {
+                Icon(Icons.Filled.Add, null, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("سلسلة جديدة — يدوياً أو من قائمة يوتيوب", fontSize = 15.sp)
+            }
+
             Text(
-                "استيراد حزمة دروس",
+                "استيراد ملفات",
                 color = p.gold, style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.padding(top = 20.dp, bottom = 8.dp),
-            )
-            Text(
-                "اختر مجلد السلسلة الذي جهّزه الوكيل (تفريغ + محاذاة + ملخصات + أسئلة + وسائط) — تندمج تلقائياً وتُشغَّل بلا إنترنت.",
-                color = p.muted, fontSize = 13.sp, lineHeight = 20.sp,
-                modifier = Modifier.padding(bottom = 10.dp),
+                modifier = Modifier.padding(top = 18.dp, bottom = 8.dp),
             )
             Row(Modifier.fillMaxWidth()) {
                 OutlinedButton(
@@ -75,7 +89,7 @@ fun LibraryScreen(p: Pal, onSeries: (String) -> Unit) {
                     enabled = !busy,
                 ) {
                     Icon(Icons.Filled.FolderOpen, null, tint = p.gold, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp)); Text("مجلد سلسلة كامل")
+                    Spacer(Modifier.width(6.dp)); Text("مجلد كامل")
                 }
                 Spacer(Modifier.width(8.dp))
                 OutlinedButton(
@@ -105,12 +119,13 @@ fun LibraryScreen(p: Pal, onSeries: (String) -> Unit) {
                 Spacer(Modifier.width(8.dp))
                 OutlinedButton(
                     onClick = {
-                        scope.launch {
+                        if (LocalLib.playlistOf(link).isNotEmpty()) {
+                            createUrl = link; link = ""; showCreate = true
+                        } else scope.launch {
                             busy = true
-                            val n = if (LocalLib.playlistOf(link).isNotEmpty()) LocalLib.importPlaylist(link)
-                                    else if (LocalLib.importVideoLink(link).isNotEmpty()) 1 else 0
+                            val n = if (LocalLib.importVideoLink(link).isNotEmpty()) 1 else 0
                             link = ""
-                            if (n > 0) after(n) else { msg = "الرابط غير صالح أو لم يُعثر على دروس"; }
+                            if (n > 0) after(n) else { msg = "الرابط غير صالح" }
                             busy = false
                         }
                     },
@@ -131,36 +146,70 @@ fun LibraryScreen(p: Pal, onSeries: (String) -> Unit) {
                 modifier = Modifier.padding(top = 10.dp, bottom = 6.dp),
             )
             HorizontalDivider(color = p.line, modifier = Modifier.padding(vertical = 8.dp))
-            Text("سلاسلي المحلية", color = p.gold, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(bottom = 8.dp))
         }
 
         if (local.isEmpty()) {
             item {
                 Column(Modifier.fillMaxWidth().padding(vertical = 28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Outlined.AudioFile, null, tint = p.muted, modifier = Modifier.size(36.dp))
-                    Text("لا سلاسل محلية بعد", color = p.muted, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp))
-                    Text("عندما يرسل لك الوكيل حزمة سلسلة، استوردها من الأعلى", color = p.muted, fontSize = 12.sp, textAlign = TextAlign.Center)
+                    Text("لا سلاسل بعد — أنشئ أولى سلاسلك", color = p.muted, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp))
+                    Text("أو استورد حزمة الوكيل أو رابط قائمة يوتيوب من الأعلى", color = p.muted, fontSize = 12.sp, textAlign = TextAlign.Center)
                 }
             }
         }
-        items(local, key = { it.id }) { s ->
-            val hasMedia = LocalLib.seriesHasMedia(s.id)
-            Row(
-                Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(14.dp))
-                    .background(p.card).border(1.dp, p.line, RoundedCornerShape(14.dp))
-                    .clickable { onSeries(s.id) }.padding(horizontal = 14.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(Modifier.size(40.dp).clip(RoundedCornerShape(11.dp)).background(p.soft), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Filled.CloudDownload, null, tint = p.gold, modifier = Modifier.size(18.dp))
+
+        // مجموعات حسب المجلد (متداخلة مثل «فقه/ابن-باز»)
+        local.groupBy { it.folder }.toSortedMap().forEach { (fold, list) ->
+            if (fold.isNotEmpty()) {
+                item(key = "fold:$fold") {
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Filled.Folder, null, tint = p.gold, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(fold.replace('/', '›'), color = p.gold, fontSize = 13.sp)
+                    }
                 }
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(s.title, color = p.text, style = MaterialTheme.typography.bodyMedium)
-                    Text("${s.items.size} درس" + if (hasMedia) " · وسائط منزّلة" else "", color = p.muted, fontSize = 12.sp)
+            }
+            items(list, key = { it.id }) { s ->
+                val hasMedia = LocalLib.seriesHasMedia(s.id)
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(14.dp))
+                        .background(p.card).border(1.dp, p.line, RoundedCornerShape(14.dp))
+                        .clickable { onSeries(s.id) }.padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.size(40.dp).clip(RoundedCornerShape(11.dp)).background(p.soft), contentAlignment = Alignment.Center) {
+                        Icon(seriesIconOf(s.icon.ifEmpty { "book" }), null, tint = p.gold, modifier = Modifier.size(18.dp))
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(s.title, color = p.text, style = MaterialTheme.typography.bodyMedium)
+                        Text("${s.items.size} درس" + if (hasMedia) " · وسائط منزّلة" else "", color = p.muted, fontSize = 12.sp)
+                    }
+                    IconButton(onClick = { editId = s.id }, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Filled.Edit, "تحرير", tint = p.muted, modifier = Modifier.size(16.dp))
+                    }
                 }
             }
         }
         item { Spacer(Modifier.height(30.dp)) }
+    }
+
+    if (showCreate) {
+        ModalBottomSheet(onDismissRequest = { showCreate = false }, containerColor = p.card) {
+            CreateSeriesSheet(p, createUrl) { id ->
+                showCreate = false; Repo.mergeLocal(); rev++
+                onSeries(id)
+            }
+        }
+    }
+    editId?.let { eid ->
+        ModalBottomSheet(onDismissRequest = { editId = null }, containerColor = p.card) {
+            EditSeriesSheet(p, eid) {
+                editId = null; Repo.mergeLocal(); rev++
+            }
+        }
     }
 }

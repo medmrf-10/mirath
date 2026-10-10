@@ -5,14 +5,19 @@ import android.net.Uri
 import androidx.documentfile.provider.DocumentFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.jsonObject
 import java.io.File
 
 /**
- * المكتبة المحلية: ملفات يرفعها المستخدم من الهاتف (ينتجها وكيل التفريغ المعيّن).
- * البنية داخل files/imports/<سلسلة>/<درس>/{transcript.txt,align.json,summary.json,questions.json,media.mp3|mp4}
- * وملف اختياري <سلسلة>/series.json: {"title","science","kind","lessons":{"<id>":{"title","duration"}}}
+ * مكتبة المستخدم المحلية — التطبيق منصة عامة: المستخدم ينشئ سلاسله بنفسه
+ * (أيقونة + مجلدات متداخلة + دروس من يوتيوب أو ملفات)، أو يستورد حزم الوكيل.
+ *
+ * البنية: files/imports/[<مجلدات متداخلة>/]<سلسلة>/<درس>/{transcript.txt,align.json,summary.json,questions.json,media.mp3|mp4,yt.txt}
+ * وملف series.json موسّع: {"title","science","kind","icon","order":[ids],"lessons":{"<id>":{"title","duration"}}}
+ * سلسلة = مجلد فيه series.json، أو مجلد أول-مستوى فيه مجلدات دروس (الحزم القديمة).
  */
 object LocalLib {
     private var root: File? = null
@@ -21,46 +26,71 @@ object LocalLib {
         if (root == null) root = File(ctx.filesDir, "imports").apply { mkdirs() }
     }
 
-    private fun seriesDirs(): List<File> = root?.listFiles()?.filter { it.isDirectory } ?: emptyList()
+    /** سلسلة: فيها series.json — أو مجلد أول-مستوى فيه مجلدات فرعية (حزم قديمة). */
+    private fun seriesDirs(): List<File> {
+        val r = root ?: return emptyList()
+        val out = mutableListOf<File>()
+        fun scan(d: File, depth: Int) {
+            val kids = d.listFiles()?.filter { it.isDirectory } ?: emptyList()
+            if (File(d, "series.json").exists() || (depth == 1 && kids.isNotEmpty())) { out += d; return }
+            if (depth < 5) kids.forEach { scan(it, depth + 1) }
+        }
+        r.listFiles()?.filter { it.isDirectory }?.forEach { scan(it, 1) }
+        return out.sortedBy { it.relativeTo(r).path }
+    }
 
-    private fun meta(slug: String): JsonElement? = runCatching {
-        Api.json.parseToJsonElement(File(root, "$slug/series.json").readText())
-    }.getOrNull()
+    private fun slugOf(d: File): String = d.relativeTo(root!!).path
+    private fun dirOf(slug: String): File = File(root, slug)
+    private fun folderOf(d: File): String = d.relativeTo(root!!).parent ?: ""
 
-    /** سلاسل محلية مدمجة مع كتالوج إرث — علمها «محلي» إن لم يحدّد. */
+    private fun metaFile(sd: File) = File(sd, "series.json")
+    private fun metaOf(sd: File): UMeta = runCatching {
+        Api.json.decodeFromString<UMeta>(metaFile(sd).readText())
+    }.getOrDefault(UMeta(title = sd.name))
+
+    private fun writeMeta(sd: File, m: UMeta) {
+        metaFile(sd).writeText(Api.json.encodeToString(m))
+    }
+
+    /** سلاسل المستخدم مدمجة مع الكتالوج — id على شكل «L:<مسار نسبي>». */
     fun localSeries(): List<Series> = seriesDirs().map { d ->
-        val m = meta(d.name)?.jsonObject
-        fun f(k: String) = (m?.get(k) as? kotlinx.serialization.json.JsonPrimitive)?.content ?: ""
+        val m = metaOf(d)
+        val ordered = orderLessons(d, m)
         Series(
-            id = "L:${d.name}", title = f("title").ifEmpty { d.name },
-            science = f("science").ifEmpty { "local" }, kind = f("kind"),
-            items = lessonDirs(d).map { "L:${d.name}/${it.name}" },
+            id = "L:${slugOf(d)}", title = m.title.ifEmpty { d.name },
+            science = m.science.ifEmpty { "local" }, kind = m.kind,
+            items = ordered.map { "L:${slugOf(d)}/${it.name}" },
+            icon = m.icon, folder = folderOf(d),
         )
     }
 
-    private fun lessonDirs(sd: File): List<File> = sd.listFiles()?.filter { it.isDirectory }?.sortedBy { it.name } ?: emptyList()
+    /** دروس السلسلة بترتيب meta.order ثم بقية المجلدات أبجدياً. */
+    private fun orderLessons(sd: File, m: UMeta): List<File> {
+        val dirs = sd.listFiles()?.filter { it.isDirectory }?.associateBy { it.name } ?: emptyMap()
+        val out = m.order.mapNotNull { dirs[it] }.toMutableList()
+        dirs.keys.sorted().filter { k -> out.none { it.name == k } }.forEach { out += dirs[it]!! }
+        return out
+    }
 
-    private fun lessonMeta(slug: String, lid: String): Pair<String, Int> {
-        val m = meta(slug)?.jsonObject
-        val l = (m?.get("lessons")?.jsonObject?.get(lid))?.jsonObject
-        val t = (l?.get("title") as? kotlinx.serialization.json.JsonPrimitive)?.content ?: ""
-        val du = (l?.get("duration") as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() ?: 0
-        return (if (t.isNotEmpty()) t else lid) to du
+    private fun lessonMetaOf(m: UMeta, lid: String): Pair<String, Int> {
+        val l = m.lessons[lid]
+        return (if (l != null && l.title.isNotEmpty()) l.title else lid) to (l?.duration ?: 0)
     }
 
     fun localVideos(): List<Video> = seriesDirs().flatMap { sd ->
-        lessonDirs(sd).map { ld ->
-            val (title, dur) = lessonMeta(sd.name, ld.name)
+        val m = metaOf(sd)
+        orderLessons(sd, m).map { ld ->
+            val (title, dur) = lessonMetaOf(m, ld.name)
             val has = mutableListOf<String>()
             if (File(ld, "transcript.txt").exists()) has += "transcript"
             if (File(ld, "align.json").exists()) has += "align"
             if (File(ld, "summary.json").exists()) has += "summary"
             if (File(ld, "questions.json").exists()) has += "questions"
-            if (mediaFile(sd.name, ld.name) != null) has += "media"
+            if (mediaFile(slugOf(sd), ld.name) != null) has += "media"
             val yt = File(ld, "yt.txt").takeIf { it.exists() }?.readText()?.trim()
                 ?: ytOf(File(ld, "link.txt").takeIf { it.exists() }?.readText()?.trim() ?: "")
             if (yt.isNotEmpty()) has += "yt"
-            Video(id = "L:${sd.name}/${ld.name}", title = title, duration = dur, has = has, yt = yt)
+            Video(id = "L:${slugOf(sd)}/${ld.name}", title = title, duration = dur, has = has, yt = yt)
         }
     }
 
@@ -70,9 +100,11 @@ object LocalLib {
     private fun ld(slug: String, lid: String): File = File(root, "$slug/$lid")
 
     private fun file(id: String, name: String): File? {
-        val p = id.removePrefix("L:").split("/", limit = 2)
-        if (p.size < 2) return null
-        return File(ld(p[0], p[1]), name).takeIf { it.exists() }
+        val raw = id.removePrefix("L:")
+        val slug = raw.substringBeforeLast("/", "") // مسار السلسلة وقد يكون متداخلاً «مجلد/سلسلة»
+        val lid = raw.substringAfterLast("/", "")
+        if (slug.isEmpty() || lid.isEmpty()) return null
+        return File(ld(slug, lid), name).takeIf { it.exists() }
     }
 
     fun transcript(id: String): String? = file(id, "transcript.txt")?.readText()
@@ -87,18 +119,94 @@ object LocalLib {
         ld(slug, lid).listFiles()?.firstOrNull { it.name.startsWith("media.") && it.extension.lowercase() in listOf("mp3", "m4a", "wav", "ogg", "mp4", "webm", "mkv") }
 
     fun mediaFor(id: String): File? {
-        val p = id.removePrefix("L:").split("/", limit = 2)
-        return if (p.size < 2) null else mediaFile(p[0], p[1])
+        val raw = id.removePrefix("L:")
+        val slug = raw.substringBeforeLast("/", "")
+        val lid = raw.substringAfterLast("/", "")
+        return if (slug.isEmpty() || lid.isEmpty()) null else mediaFile(slug, lid)
     }
 
     /** هل للسلسلة (أي درس) وسائط محلية تسمح بوضع «محلي»؟ */
     fun seriesHasMedia(seriesId: String): Boolean {
-        val slug = seriesId.removePrefix("L:")
-        val sd = File(root, slug)
-        return lessonDirs(sd).any { mediaFile(slug, it.name) != null }
+        val sd = dirOf(seriesId.removePrefix("L:"))
+        return sd.listFiles()?.filter { it.isDirectory }?.any { c ->
+            c.listFiles()?.any { it.name.startsWith("media.") } == true
+        } == true
     }
 
     fun totalBytes(): Long = root?.walkTopDown()?.filter { it.isFile }?.sumOf { it.length() } ?: 0
+
+    // ===== إنشاء وتحرير سلاسل المستخدم =====
+
+    private fun slugify(t: String): String =
+        t.trim().replace(Regex("[\\\\/:\"*?<>|]"), "-").replace(Regex("\\s+"), " ").take(60).ifEmpty { "سلسلة" }
+
+    private fun uniqueSlug(folder: String, want: String): String {
+        var s = want; var i = 2
+        while (File(root, "${folder}/$s".trim('/')).exists()) s = "$want-${i++}"
+        return s
+    }
+
+    /** إنشاء سلسلة فارغة — يعيد id «L:<مسار>»؛ folder مسار نسبي متداخل اختياري «فقه/ابن-باز». */
+    fun createSeries(title: String, icon: String, folder: String): String {
+        val f = folder.trim().trim('/').split("/").filter { it.isNotBlank() }.joinToString("/") { slugify(it) }
+        val slug = uniqueSlug(f, slugify(title))
+        val sd = File(root, if (f.isEmpty()) slug else "$f/$slug"); sd.mkdirs()
+        writeMeta(sd, UMeta(title = title.trim().ifEmpty { slug }, icon = icon))
+        return "L:${slugOf(sd)}"
+    }
+
+    fun seriesMeta(seriesId: String): UMeta = metaOf(dirOf(seriesId.removePrefix("L:")))
+
+    fun setSeriesInfo(seriesId: String, title: String, icon: String) {
+        val sd = dirOf(seriesId.removePrefix("L:"))
+        writeMeta(sd, metaOf(sd).copy(title = title.trim().ifEmpty { sd.name }, icon = icon))
+    }
+
+    /** استبدال قائمة الدروس كاملة (عناوين+ترتيب) — dir names ثابتة فلا يُفقد التقدّم. */
+    fun setLessons(seriesId: String, items: List<Pair<String, String>>) {
+        val sd = dirOf(seriesId.removePrefix("L:"))
+        val m = metaOf(sd)
+        val lm = items.associate { (lid, t) -> lid to (m.lessons[lid]?.copy(title = t) ?: ULesson(title = t)) }
+        writeMeta(sd, m.copy(order = items.map { it.first }, lessons = lm))
+    }
+
+    /** قائمة الدروس الحالية للتحرير: (lid, title). */
+    fun lessonsOf(seriesId: String): List<Pair<String, String>> {
+        val sd = dirOf(seriesId.removePrefix("L:"))
+        val m = metaOf(sd)
+        return orderLessons(sd, m).map { it.name to lessonMetaOf(m, it.name).first }
+    }
+
+    /** إضافة درس لسلسلة مستخدم — يعيد لقب الدرس (dir name). */
+    fun addLesson(seriesId: String, title: String, yt: String): String {
+        val sd = dirOf(seriesId.removePrefix("L:"))
+        val m = metaOf(sd)
+        val lid = uniqueLessonLid(sd)
+        File(sd, lid).mkdirs()
+        if (yt.isNotEmpty()) File(sd, "$lid/yt.txt").writeText(ytOf(yt))
+        writeMeta(sd, m.copy(
+            order = m.order + lid,
+            lessons = m.lessons + (lid to ULesson(title = title.trim().ifEmpty { lid })),
+        ))
+        return lid
+    }
+
+    private fun uniqueLessonLid(sd: File): String {
+        var i = sd.listFiles()?.count { it.isDirectory }?.plus(1) ?: 1
+        while (File(sd, "%03d".format(i)).exists()) i++
+        return "%03d".format(i)
+    }
+
+    fun deleteSeries(seriesId: String) { dirOf(seriesId.removePrefix("L:")).deleteRecursively() }
+
+    fun removeLesson(seriesId: String, lid: String) {
+        val sd = dirOf(seriesId.removePrefix("L:"))
+        File(sd, lid).deleteRecursively()
+        val m = metaOf(sd)
+        writeMeta(sd, m.copy(order = m.order - lid, lessons = m.lessons - lid))
+    }
+
+    // ===== استيراد =====
 
     /** استيراد شجرة مجلد كامل (منتقي مجلدات النظام). */
     suspend fun importTree(ctx: Context, uri: Uri): Int = withContext(Dispatchers.IO) {
@@ -143,6 +251,17 @@ object LocalLib {
         n
     }
 
+    /** إرفاق ملف واحد بدرس محدد في سلسلة مستخدم (تصنيف من الاسم). */
+    suspend fun attachTo(ctx: Context, seriesId: String, lid: String, uri: Uri): Boolean = withContext(Dispatchers.IO) {
+        val d = DocumentFile.fromSingleUri(ctx, uri) ?: return@withContext false
+        val (_, canon) = classify(d.name ?: return@withContext false)
+        val out = File(ld(seriesId.removePrefix("L:"), lid), canon)
+        out.parentFile?.mkdirs()
+        runCatching {
+            ctx.contentResolver.openInputStream(uri)?.use { i -> out.outputStream().use { i.copyTo(it) } }
+        }.isSuccess
+    }
+
     /** تصنيف اسم ملف إلى (مفتاح الدرس, الاسم القياسي). */
     fun classify(name: String): Pair<String, String> {
         val low = name.lowercase()
@@ -183,19 +302,57 @@ object LocalLib {
         yt
     }
 
-    /** إضافة سلسلة من رابط قائمة يوتيوب — يجلب صفحة القائمة ويستخرج معرفات الدروس. */
-    suspend fun importPlaylist(text: String): Int = withContext(Dispatchers.IO) {
-        val pl = playlistOf(text); if (pl.isEmpty()) return@withContext 0
-        val sd = File(root, "قائمة-$pl"); sd.mkdirs()
-        File(sd, "series.json").writeText("{\"title\":\"قائمة يوتيوب $pl\",\"science\":\"local\"}")
+    /**
+     * جلب قائمة يوتيوب: (عنوان القائمة، [(ytId, عنوان الحلقة) بالترتيب]).
+     * يُستخدم في شاشة الإنشاء — المستخدم يعدّل العناوين والترتيب قبل الحفظ.
+     */
+    suspend fun fetchPlaylist(text: String): Pair<String, List<Pair<String, String>>> = withContext(Dispatchers.IO) {
+        val pl = playlistOf(text); if (pl.isEmpty()) return@withContext ("" to emptyList())
         runCatching {
             val html = java.net.URL("https://www.youtube.com/playlist?list=$pl").readText()
-            val ids = Regex("\"videoId\":\"([\\w-]{11})\"").findAll(html).map { it.groupValues[1] }.toList().distinct()
-            ids.forEachIndexed { i, yt ->
-                val d = File(sd, "%03d".format(i + 1)); d.mkdirs()
-                File(d, "yt.txt").writeText(yt)
-            }
-            ids.size
-        }.getOrDefault(0)
+            val plTitle = Regex("<title>(.+?)</title>").find(html)?.groupValues?.get(1)
+                ?.replace(Regex(" - YouTube$"), "")?.trim() ?: ""
+            val pat = Regex("\"videoId\":\"([\\w-]{11})\".{0,500}?\"title\":\\{\"runs\":\\[\\{\"text\":\"(.+?)\"", RegexOption.DOT_MATCHES_ALL)
+            val items = pat.findAll(html).map { it.groupValues[1] to unesc(it.groupValues[2]) }
+                .distinctBy { it.first }.toList()
+            plTitle to items
+        }.getOrDefault("" to emptyList())
+    }
+
+    private fun unesc(s: String): String = s
+        .replace("\\u0026", "&").replace("\\u003c", "<").replace("\\u003e", ">")
+        .replace("\\u0027", "'").replace("\\\"", "\"").replace("\\\\", "\\")
+        .let { t -> Regex("\\\\u([0-9a-fA-F]{4})").replace(t) { m -> m.groupValues[1].toInt(16).toChar().toString() } }
+
+    /** حفظ سلسلة مستوردة من قائمة: (id, title) مرتبة ومعنونة كما عدّلها المستخدم. */
+    fun createFromPlaylist(title: String, icon: String, folder: String, items: List<Pair<String, String>>): String {
+        val sid = createSeries(title, icon, folder)
+        val sd = dirOf(sid.removePrefix("L:"))
+        val lids = mutableListOf<String>()
+        items.forEachIndexed { i, (yt, t) ->
+            val lid = "%03d".format(i + 1)
+            File(sd, lid).mkdirs()
+            File(sd, "$lid/yt.txt").writeText(yt)
+            lids += lid
+        }
+        val m = metaOf(sd)
+        writeMeta(sd, m.copy(
+            order = lids,
+            lessons = items.mapIndexed { i, (_, t) -> lids[i] to ULesson(title = t.ifEmpty { "حلقة ${i + 1}" }) }.toMap(),
+        ))
+        return sid
     }
 }
+
+@Serializable
+data class UMeta(
+    val title: String = "",
+    val science: String = "local",
+    val kind: String = "",
+    val icon: String = "book",
+    val order: List<String> = emptyList(),
+    val lessons: Map<String, ULesson> = emptyMap(),
+)
+
+@Serializable
+data class ULesson(val title: String = "", val duration: Int = 0)

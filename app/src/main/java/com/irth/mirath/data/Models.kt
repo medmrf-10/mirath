@@ -17,6 +17,8 @@ data class Series(
     val science: String = "",
     val kind: String = "",
     val items: List<String> = emptyList(),
+    val icon: String = "",
+    val folder: String = "",
 )
 
 @Serializable
