@@ -290,6 +290,10 @@ fun StatsScreen(p: Pal) {
             StatRow(p, "قيد المشاهدة", "$ong", if (total > 0) ong.toFloat() / total else 0f)
             StatRow(p, "دروس أتممتها", "$fin", if (total > 0) fin.toFloat() / total else 0f)
             StatRow(p, "مفضلاتك", "$fav")
+            val today = Prefs.listenSec(0)
+            val week = (0..6).sumOf { Prefs.listenSec(it) }
+            StatRow(p, "استماعك اليوم", fmtDur(today))
+            StatRow(p, "استماعك هذا الأسبوع", fmtDur(week))
         }
     }
 }

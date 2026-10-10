@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.draw.alpha
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Favorite
@@ -32,6 +34,7 @@ import com.irth.mirath.data.Repo
 import com.irth.mirath.data.LocalLib
 import com.irth.mirath.data.Update
 import com.irth.mirath.store.Prefs
+import com.irth.mirath.player.Playback
 import com.irth.mirath.ui.*
 import com.irth.mirath.ui.theme.MirathTheme
 import com.irth.mirath.ui.theme.palOf
@@ -52,8 +55,15 @@ class MainActivity : ComponentActivity() {
         Prefs.init(applicationContext)
         Api.init(applicationContext)
         LocalLib.init(applicationContext)
+        Playback.init(applicationContext)
+        intent?.getStringExtra("lesson")?.let { Playback.openRequest.value = it }
         enableEdgeToEdge()
         setContent { MirathApp() }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        intent.getStringExtra("lesson")?.let { Playback.openRequest.value = it }
     }
 }
 
@@ -73,6 +83,19 @@ fun MirathApp() {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
 
+    // درس → درس داخل الصفحة يستبدل الدرس الحالي في المكدّس (كتبديل المقطع في مشغّلات الصوت) فلا يعيد «رجوع» تشغيل السابق
+    fun toLesson(id: String) {
+        if (route.contains("LessonR")) nav.popBackStack()
+        nav.navigate(LessonR(id)) { launchSingleTop = true }
+    }
+    val openReq = Playback.openRequest.value
+    LaunchedEffect(openReq, booted) {
+        if (openReq != null && booted && Repo.video(openReq) != null) {
+            Playback.openRequest.value = null
+            if (!(route.contains("LessonR") && backEntry?.arguments?.getString("id") == openReq)) nav.navigate(LessonR(openReq)) { launchSingleTop = true }
+        }
+    }
+
     suspend fun doBoot() {
         runCatching { Repo.boot() }.onFailure { bootErr = true }
         if (Repo.sciences != null) bootErr = false
@@ -90,6 +113,8 @@ fun MirathApp() {
 
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         MirathTheme(themeName) {
+            // موقف خفي للمشغّل: يبقى الصوت حياً حين لا تعرضه صفحة الدرس ولا المصغّر (مثل وضع «تفريغ»)
+            WebHost(Modifier.size(1.dp).alpha(0f))
             Scaffold(
                 modifier = Modifier.fillMaxSize(),
                 containerColor = p.bg,
@@ -113,6 +138,7 @@ fun MirathApp() {
                 },
                 bottomBar = {
                     Column {
+                        MiniPlayer(p, visible = booted && !route.contains("LessonR")) { id -> nav.navigate(LessonR(id)) { launchSingleTop = true } }
                         update?.let { u ->
                             Row(
                                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)
@@ -170,7 +196,7 @@ fun MirathApp() {
                         }
                         composable<LessonR> { e ->
                             val r = e.toRoute<LessonR>()
-                            LessonScreen(p, r.id, onLesson = { nav.navigate(LessonR(it)) { launchSingleTop = true } })
+                            LessonScreen(p, r.id, onLesson = { toLesson(it) })
                         }
                     }
                 }

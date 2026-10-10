@@ -33,9 +33,8 @@ import com.irth.mirath.data.LocalLib
 import com.irth.mirath.data.Repo
 import com.irth.mirath.data.Summary
 import com.irth.mirath.data.buildPhrases
-import com.irth.mirath.player.YtCtl
-import com.irth.mirath.player.LocalPlayer
-import com.irth.mirath.player.YtPlayer
+import com.irth.mirath.player.Playback
+import androidx.compose.runtime.saveable.rememberSaveable
 import com.irth.mirath.store.Prefs
 import com.irth.mirath.ui.theme.Amiri
 import com.irth.mirath.ui.theme.Pal
@@ -64,19 +63,17 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
     var transcript by remember { mutableStateOf<String?>(null) }
     var summary by remember { mutableStateOf<Summary?>(null) }
     var questions by remember { mutableStateOf<List<QA>?>(null) }
-    var pos by remember { mutableStateOf(Prefs.progress(videoId).toDouble()) }
-    var dur by remember { mutableStateOf(v.duration.toDouble()) }
-    var playing by remember { mutableStateOf(false) }
+    val isCur = Playback.cur.value == videoId
+    val pos = if (isCur) Playback.pos.value else Prefs.progress(videoId).toDouble()
+    val dur = if (isCur && Playback.dur.value > 0) Playback.dur.value else v.duration.toDouble()
+    val playing = isCur && Playback.playing.value
     var curPh by remember { mutableStateOf(0) }
-    var spdI by remember { mutableStateOf(0) }
-    var slpI by remember { mutableStateOf(-1) }
+    val spdI = SPEEDS.indexOf(Playback.speed.value).coerceAtLeast(0)
+    val slpI = SLEEPS.indexOf(Playback.sleepMin.value)
     var showDrawer by remember { mutableStateOf(false) }
-    val ctl = remember { YtCtl() }
-    val scope = rememberCoroutineScope()
     val ser = remember(videoId) { Repo.series?.firstOrNull { it.items.contains(videoId) } }
-    val media = remember(videoId, Prefs.srcRev.value) {
-        LocalLib.mediaFor(videoId)?.takeIf { v.yt.isEmpty() || Prefs.src(ser?.id ?: "") == "local" }
-    }
+    var claimedRev by rememberSaveable(videoId) { mutableStateOf(-1) }
+    val srcRev = Prefs.srcRev.value
 
     LaunchedEffect(videoId) {
         Prefs.markOpened(videoId)
@@ -90,15 +87,14 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
         if (v.has.contains("summary")) summary = Repo.summary(videoId)
         if (v.has.contains("questions")) questions = Repo.questions(videoId)
     }
-    LaunchedEffect(videoId) {
-        while (true) { delay(5000); if (pos > 0) Prefs.setProgress(videoId, pos.toInt()) }
+    // المحرك العالمي: فتح الدرس مرة واحدة لكل دخول (لا عند الرجوع إليه من المكدّس)، والمتابعة دون إعادة إن كان جارياً
+    LaunchedEffect(videoId, srcRev) {
+        if (claimedRev != srcRev) { claimedRev = srcRev; Playback.open(ctx, videoId) }
     }
-    // مؤقت النوم
-    LaunchedEffect(slpI) {
-        if (slpI in SLEEPS.indices) {
-            delay(SLEEPS[slpI] * 60_000L)
-            ctl.pause(); slpI = -1
-        }
+    // الانتقال التلقائي للدرس التالي يتم في المحرك — والصفحة تتبعه إن كانت تعرض الدرس المنتهي
+    val adv = Playback.advanced.value
+    LaunchedEffect(adv) {
+        if (adv != null && adv.first == videoId) { Playback.advanced.value = null; onLesson(adv.second) }
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -121,32 +117,7 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
             "live" -> LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
                 item {
                     Spacer(Modifier.height(10.dp))
-                    if (media != null) LocalPlayer(media, ctl, Prefs.progress(videoId).toInt(),
-                        onEnded = {
-                            Prefs.setProgress(videoId, 0)
-                            if (ser != null) {
-                                val idx = ser.items.indexOf(videoId)
-                                val next = ser.items.drop(idx + 1).firstOrNull { nid ->
-                                    Repo.video(nid)?.let { !Prefs.finished(nid, it.duration) } == true
-                                }
-                                if (next != null) onLesson(next)
-                            }
-                        },
-                        onState = { playing = it == 1 }, p = p,
-                    ) { t -> pos = t }
-                    else YtPlayer(v.yt, ctl, Prefs.progress(videoId),
-                        onEnded = {
-                            Prefs.setProgress(videoId, 0)
-                            if (ser != null) {
-                                val idx = ser.items.indexOf(videoId)
-                                val next = ser.items.drop(idx + 1).firstOrNull { nid ->
-                                    Repo.video(nid)?.let { !Prefs.finished(nid, it.duration) } == true
-                                }
-                                if (next != null) onLesson(next)
-                            }
-                        },
-                        onState = { playing = it == 1 },
-                    ) { t -> pos = t }
+                    LessonPlayer(p, videoId, v.yt)
                     Spacer(Modifier.height(10.dp))
 
                     // المسرح الحي — الجملة الحالية بالكشف الذهبي
@@ -176,7 +147,7 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
                                             color = st.first,
                                             modifier = Modifier
                                                 .alpha(st.second)
-                                                .clickable { ctl.seek(w.s - 0.05) }
+                                                .clickable { if (isCur) Playback.seek(w.s - 0.05) }
                                                 .padding(horizontal = 2.dp),
                                         )
                                     }
@@ -194,7 +165,7 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                             Box(
                                 Modifier.size(56.dp).clip(CircleShape).background(p.primary)
-                                    .clickable { if (playing) ctl.pause() else ctl.play() },
+                                    .clickable { if (isCur) Playback.toggle() else Playback.open(ctx, videoId, autoplay = true) },
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Icon(
@@ -219,10 +190,11 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
                                 ctx.startActivity(Intent.createChooser(send, "مشاركة"))
                             }
                             ChipBtn(p, "×${SPEEDS[spdI].let { if (it % 1.0 == 0.0) it.toInt().toString() else it.toString() }}", spdI != 0) {
-                                spdI = (spdI + 1) % SPEEDS.size; ctl.rate(SPEEDS[spdI])
+                                Playback.setSpeed(SPEEDS[(spdI + 1) % SPEEDS.size])
                             }
                             ChipBtn(p, if (slpI >= 0) "نوم ${SLEEPS[slpI]}" else "نوم", slpI >= 0) {
-                                slpI = (slpI + 1) % (SLEEPS.size + 1)
+                                val n = (slpI + 1) % (SLEEPS.size + 1)
+                                Playback.setSleep(if (n < SLEEPS.size) SLEEPS[n] else 0)
                             }
                         }
                         Box(

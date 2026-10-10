@@ -78,4 +78,20 @@ object Prefs {
         srcRev.value++
     }
     val srcRev = mutableStateOf(0)
+
+    /** ثواني الاستماع الفعلي لكل يوم (ls.yyyyMMdd) — أساس العادة وسلسلة المواظبة. */
+    private fun dayKey(off: Int = 0): String {
+        val c = java.util.Calendar.getInstance().apply { add(java.util.Calendar.DAY_OF_YEAR, -off) }
+        return "ls.%04d%02d%02d".format(c.get(java.util.Calendar.YEAR), c.get(java.util.Calendar.MONTH) + 1, c.get(java.util.Calendar.DAY_OF_MONTH))
+    }
+    private var listenBuf = 0.0
+    fun addListen(sec: Double) {
+        listenBuf += sec
+        if (listenBuf >= 10) {
+            val k = dayKey()
+            sp?.edit()?.putInt(k, (sp?.getInt(k, 0) ?: 0) + listenBuf.toInt())?.apply()
+            listenBuf -= listenBuf.toInt()
+        }
+    }
+    fun listenSec(daysAgo: Int = 0): Int = (sp?.getInt(dayKey(daysAgo), 0) ?: 0) + if (daysAgo == 0) listenBuf.toInt() else 0
 }
