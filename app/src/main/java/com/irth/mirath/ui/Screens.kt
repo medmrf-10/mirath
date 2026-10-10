@@ -35,6 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.irth.mirath.data.Haw
 import com.irth.mirath.data.LocalLib
 import com.irth.mirath.data.QA
 import com.irth.mirath.data.Repo
@@ -156,6 +157,8 @@ fun ScienceScreen(p: Pal, scienceId: String, onSeries: (String) -> Unit, onLesso
 
 @Composable
 fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit, onExam: (String) -> Unit = {}) {
+    val srcRev = Prefs.srcRev.value  // إعادة تركيب بعد تحميل دروس هوشات كسولاً
+    LaunchedEffect(seriesId) { runCatching { Haw.ensure(seriesId) } }
     val s = Repo.seriesOf(seriesId)
     if (s == null) { EmptyBox(p, "السلسلة غير موجودة"); return }
     val ctx = LocalContext.current

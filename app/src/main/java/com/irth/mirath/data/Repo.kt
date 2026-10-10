@@ -28,6 +28,7 @@ object Repo {
         videos = Api.decode<Rows<Video>>(Api.getJson("/data/tube/videos.json")).rows
         persons = Api.decode<Rows<Person>>(Api.getJson("/data/persons.json")).rows
         works = Api.decode<Rows<Work>>(Api.getJson("/data/works.json")).rows
+        runCatching { Haw.boot() }
         mergeLocal()
     }
 
@@ -65,6 +66,9 @@ object Repo {
         val l = lesson(id)
         if (l.align == null) {
             LocalLib.alignEl(id)?.let { runCatching { l.align = parseAlign(it) } }
+            if (l.align == null && id.startsWith("H:")) {
+                runCatching { l.align = Haw.align(id) }
+            }
             if (l.align == null) {
                 runCatching { l.align = parseAlign(Api.getJson("/content/tube/$id/align.json")) }
             }
@@ -76,7 +80,7 @@ object Repo {
     suspend fun transcript(id: String): String {
         val l = lesson(id)
         if (l.transcript == null) l.transcript = LocalLib.transcript(id)
-            ?: runCatching { Api.getText("/content/tube/$id/transcript.txt") }.getOrDefault("")
+            ?: (if (id.startsWith("H:")) runCatching { Haw.transcript(id) }.getOrDefault("") else runCatching { Api.getText("/content/tube/$id/transcript.txt") }.getOrDefault(""))
         return l.transcript!!
     }
 
@@ -84,8 +88,9 @@ object Repo {
         val l = lesson(id)
         if (l.summary == null) {
             runCatching {
-                val o = LocalLib.summaryEl(id)?.jsonObject ?: Api.getJson("/content/tube/$id/summary.json").jsonObject
-                l.summary = Api.decode<Summary>(o)
+                l.summary = if (id.startsWith("H:")) Haw.summary(id)
+                else LocalLib.summaryEl(id)?.jsonObject?.let { Api.decode<Summary>(it) }
+                    ?: Api.decode<Summary>(Api.getJson("/content/tube/$id/summary.json").jsonObject)
             }
         }
         return l.summary
@@ -95,8 +100,11 @@ object Repo {
         val l = lesson(id)
         if (l.questions == null) {
             l.questions = runCatching {
-                val el = LocalLib.questionsEl(id) ?: Api.getJson("/content/tube/$id/questions.json")
-                Api.decode<Questions>(el).questions
+                if (id.startsWith("H:")) Haw.questions(id)
+                else {
+                    val el = LocalLib.questionsEl(id) ?: Api.getJson("/content/tube/$id/questions.json")
+                    Api.decode<Questions>(el).questions
+                }
             }.getOrDefault(emptyList())
         }
         return l.questions!!

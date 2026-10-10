@@ -48,6 +48,23 @@ object Api {
         }
     }
 
+    /** جلب من رابط مطلق (مصادر خارج BASE مثل hawshat raw) بنفس الكاش. */
+    suspend fun getAbs(url: String): String = withContext(Dispatchers.IO) {
+        val cf = cacheFile(url)
+        try {
+            val req = Request.Builder().url(url).build()
+            client.newCall(req).execute().use { r ->
+                if (!r.isSuccessful) error("HTTP ${r.code} on $url")
+                val body = r.body?.string() ?: ""
+                runCatching { cf?.writeText(body) }
+                body
+            }
+        } catch (e: Exception) {
+            val cached = cf?.takeIf { it.exists() }?.readText()
+            if (cached != null) cached else throw e
+        }
+    }
+
     suspend fun getJson(path: String): JsonElement = json.parseToJsonElement(get(path)).jsonObject
     suspend fun getText(path: String): String = get(path)
 
