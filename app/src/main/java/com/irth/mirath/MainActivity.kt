@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.*
@@ -51,6 +52,7 @@ import com.irth.mirath.ui.theme.palOf
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 
+@Serializable object Today
 @Serializable object Home
 @Serializable object Fav
 @Serializable object Stats
@@ -113,6 +115,7 @@ fun MirathApp() {
                         route.contains("ScienceR") -> "إرث"
                         route.contains("Fav") -> "المفضلة"
                         route.contains("Stats") -> "إحصائي"
+                        route.contains("Today") -> "يومك"
                         else -> "إرث"
                     }
                     TopGlassBar(
@@ -167,8 +170,11 @@ fun MirathApp() {
                             }
                         }
                         NavigationBar(containerColor = p.bg, contentColor = p.muted) {
-                        NavItem(p, route.contains("Home") || route.isEmpty(), "الرئيسية", Icons.Filled.Home) {
-                            nav.navigate(Home) { popUpTo(Home) { inclusive = true } }
+                        NavItem(p, route.contains("Today") || route.isEmpty(), "اليوم", Icons.Filled.DateRange) {
+                            nav.navigate(Today) { popUpTo(Today) { inclusive = true } }
+                        }
+                        NavItem(p, route.contains("Home"), "المكتبة", Icons.Filled.Home) {
+                            nav.navigate(Home) { popUpTo(Today) }
                         }
                         NavItem(p, route.contains("Fav"), "المفضلة", Icons.Filled.Favorite) { nav.navigate(Fav) }
                         NavItem(p, route.contains("Lib"), "مكتبتي", Icons.Filled.Folder) { nav.navigate(Lib) }
@@ -187,7 +193,7 @@ fun MirathApp() {
                 } else {
                     NavHost(
                         navController = nav,
-                        startDestination = Home,
+                        startDestination = Today,
                         modifier = Modifier
                             .fillMaxSize()
                             .padding(top = pad.calculateTopPadding(), bottom = pad.calculateBottomPadding()),
@@ -196,6 +202,11 @@ fun MirathApp() {
                         popEnterTransition = { androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(220)) },
                         popExitTransition = { androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(160)) },
                     ) {
+                        composable<Today> {
+                            TodayScreen(p, onLesson = { nav.navigate(LessonR(it)) }) {
+                                nav.navigate(Home) { popUpTo(Today) }
+                            }
+                        }
                         composable<Home> {
                             HomeScreen(p, onScience = { nav.navigate(ScienceR(it)) }, onLesson = { nav.navigate(LessonR(it)) })
                         }

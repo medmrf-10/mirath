@@ -94,6 +94,7 @@ setInterval(function(){try{if(pl&&pl.getCurrentTime)window.ct=pl.getCurrentTime(
 
     fun play(ctx: Context, id: String, name: String, ytId: String, media: File?, startSec: Int, ended: () -> Unit) {
         ctxRef = ctx.applicationContext
+        runCatching { com.irth.mirath.store.Prefs.touchActivity() }
         if (videoId == id) { // نفس الدرس — أعد ربط المستمعين فقط
             onEnded = ended; return
         }

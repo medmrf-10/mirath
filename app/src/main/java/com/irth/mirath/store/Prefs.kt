@@ -22,6 +22,7 @@ object Prefs {
         qrate.value = (sp!!.getString("qrate", "") ?: "")
             .split(",").filter { it.contains(":") }
             .associate { it.substringBefore(":") to (it.substringAfter(":").toIntOrNull() ?: 0) }
+        streak.value = sp!!.getInt("streak", 0)
     }
 
     fun setTheme(t: String) {
@@ -70,6 +71,37 @@ object Prefs {
 
     fun finished(id: String, duration: Int): Boolean =
         duration > 0 && progress(id) >= duration * 0.95
+
+    val streak = mutableStateOf(0)
+
+    private fun dayOf(ms: Long): String =
+        java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date(ms))
+
+    /** يُستدعى عند بدء تشغيل فعلي — يحسب أيام المواظبة المتتالية. */
+    fun touchActivity() {
+        val today = dayOf(System.currentTimeMillis())
+        val last = sp?.getString("lastActive", "") ?: ""
+        if (last == today) return
+        val yesterday = dayOf(System.currentTimeMillis() - 86400000)
+        streak.value = if (last == yesterday) (sp?.getInt("streak", 0) ?: 0) + 1 else 1
+        sp?.edit()?.putInt("streak", streak.value)?.putString("lastActive", today)?.apply()
+    }
+
+    fun streakDays(): Int {
+        val last = sp?.getString("lastActive", "") ?: return 0
+        val t = runCatching {
+            java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).parse(last)?.time ?: return 0
+        }.getOrDefault(0L)
+        if (t == 0L) return 0
+        val days = (System.currentTimeMillis() - t) / 86400000
+        return if (days <= 1) sp?.getInt("streak", 0) ?: 0 else 0
+    }
+
+    /** كل مواضع التقدّم المحفوظة: videoId → ثوانٍ. */
+    fun progressIndex(): Map<String, Int> =
+        sp?.all?.filterKeys { it.startsWith("prg.") }
+            ?.mapKeys { it.key.removePrefix("prg.") }
+            ?.mapValues { (it.value as? Int) ?: 0 } ?: emptyMap()
 
     /** مصدر تشغيل السلسلة: "yt" يوتيوب (افتراضي) أو "local" وسائط منزّلة. */
     fun src(seriesId: String): String = sp?.getString("src.$seriesId", "yt") ?: "yt"
