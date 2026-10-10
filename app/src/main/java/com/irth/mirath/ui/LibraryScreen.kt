@@ -27,6 +27,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.irth.mirath.data.Backup
 import com.irth.mirath.data.LocalLib
 import com.irth.mirath.data.Repo
 import com.irth.mirath.data.Roadmaps
@@ -62,6 +63,12 @@ fun LibraryScreen(p: Pal, onSeries: (String) -> Unit, onRoadmap: (String) -> Uni
     }
     val pickFiles = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { us ->
         if (us.isNotEmpty()) scope.launch { busy = true; after(LocalLib.importFiles(ctx, us)); busy = false }
+    }
+    val exportBk = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { u ->
+        u?.let { scope.launch { busy = true; val n = Backup.export(ctx, it); msg = "صُدّرت نسخة احتياطية كاملة ($n ملفاً)"; busy = false } }
+    }
+    val restoreBk = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
+        u?.let { scope.launch { busy = true; val n = Backup.restore(ctx, it); Repo.mergeLocal(); rev++; msg = "استُعيدت النسخة ($n ملفاً) — سلاسلك وتقدمك وعلاماتك رجعت"; busy = false } }
     }
 
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
@@ -110,6 +117,26 @@ fun LibraryScreen(p: Pal, onSeries: (String) -> Unit, onRoadmap: (String) -> Uni
                 Icon(Icons.Filled.Map, null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
                 Text("خريطة طريق جديدة — مسارك التعليمي بخطوات", fontSize = 14.sp)
+            }
+
+            Text(
+                "نسخة احتياطية — سلاسلك وملفاتك وتقدمك في ملف واحد",
+                color = p.gold, style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.padding(top = 18.dp, bottom = 8.dp),
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = { exportBk.launch("mirath-backup.zip") },
+                    modifier = Modifier.weight(1f).height(44.dp), shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = p.text),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, p.line),
+                ) { Icon(Icons.Filled.CloudDownload, null, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(6.dp)); Text("صدّر نسخة", fontSize = 13.sp) }
+                OutlinedButton(
+                    onClick = { restoreBk.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) },
+                    modifier = Modifier.weight(1f).height(44.dp), shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = p.muted),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, p.soft),
+                ) { Icon(Icons.Filled.FolderOpen, null, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(6.dp)); Text("استعد نسخة", fontSize = 13.sp) }
             }
 
             Text(

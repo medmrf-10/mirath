@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 
 @Serializable
 data class Bookmark(val s: Int, val n: String = "", val t: Long = 0)
@@ -153,4 +154,44 @@ object Prefs {
         srcRev.value++
     }
     val srcRev = mutableStateOf(0)
+
+    /** كل التفضيلات كـJSON (تقدم/علامات/مفضلة/مواظبة/مصدر السلاسل/ثيم) — للنسخ الاحتياطي. */
+    fun exportAll(): String {
+        val o = kotlinx.serialization.json.JsonObject(
+            (sp?.all ?: emptyMap()).mapValues { (_, v) ->
+                when (v) {
+                    is Set<*> -> kotlinx.serialization.json.JsonArray(v.filterIsInstance<String>().map { kotlinx.serialization.json.JsonPrimitive(it) })
+                    is Int, is Long, is Float, is Double, is Boolean -> kotlinx.serialization.json.JsonPrimitive(v as Number)
+                    else -> kotlinx.serialization.json.JsonPrimitive(v.toString())
+                }
+            }
+        )
+        return o.toString()
+    }
+
+    /** استعادة نسخة احتياطية — يكتب المفاتيح مباشرة ثم ينعش الحالات المتذكرة. */
+    fun importAll(jsonStr: String) {
+        val o = runCatching {
+            kotlinx.serialization.json.Json.parseToJsonElement(jsonStr).jsonObject
+        }.getOrNull() ?: return
+        val ed = sp?.edit() ?: return
+        o.forEach { (k, el) ->
+            val p = el as? kotlinx.serialization.json.JsonPrimitive ?: return@forEach
+            when {
+                el is kotlinx.serialization.json.JsonArray ->
+                    ed.putStringSet(k, el.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }.toSet())
+                p.isString -> ed.putString(k, p.content)
+                p.content == "true" || p.content == "false" -> ed.putBoolean(k, p.content == "true")
+                p.content.contains('.') -> ed.putFloat(k, p.content.toFloatOrNull() ?: 0f)
+                else -> runCatching { ed.putInt(k, p.content.toInt()) }.onFailure { ed.putLong(k, p.content.toLongOrNull() ?: 0L) }
+            }
+        }
+        ed.apply()
+        // انعاش الحالات
+        theme.value = sp?.getString("theme", theme.value) ?: theme.value
+        favs.value = sp?.getStringSet("favs", favs.value) ?: favs.value
+        recent.value = (sp?.getString("recent", "") ?: "").split(",").filter { it.isNotBlank() }
+        streak.value = sp?.getInt("streak", 0) ?: 0
+        bmRev.value++; srcRev.value++
+    }
 }
