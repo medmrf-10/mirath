@@ -5,8 +5,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.doubleOrNull
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -17,6 +17,10 @@ object Haw {
     private var booted = false
     private val loaded = mutableSetOf<String>()
     var sheikhNames: Map<String, String> = emptyMap()
+
+    // slug → نوع الطبقة → (رقم الدرس → اسم الملف) — من فهرس index.json لكل سلسلة
+    // (الحشو ليس موحداً: 01.align مقابل 001.sum داخل السلسلة نفسها — الخرائط هي العقد)
+    private val files = mutableMapOf<String, MutableMap<String, Map<Int, String>>>()
 
     private suspend fun get(path: String): String = Api.getAbs("$BASE$path")
     private suspend fun getJson(path: String): JsonElement = Api.json.parseToJsonElement(get(path))
@@ -60,22 +64,27 @@ object Haw {
         }
     }
 
-    /** يُستدعى عند فتح سلسلة هوشات — يحمّل الدروس وطبقاتها ويسجّل الفيديوهات. */
+    /** يُستدعى عند فتح سلسلة هوشات — يحمّل الدروس وطبقاتها ويسجّل الفيديوهات وخرائط أسماء الملفات. */
     suspend fun ensure(seriesId: String) {
         if (!seriesId.startsWith("H:") || seriesId in loaded) return
         loaded += seriesId
         val slug = seriesId.removePrefix("H:")
         val sJson = runCatching { getJson("/playlists/series/$slug.json").jsonObject }.getOrNull() ?: return
         val lIdx = runCatching { getJson("/playlists/lessons/$slug/index.json").jsonObject }.getOrNull()
-        fun has(k: String) = lIdx?.get(k)?.let { el -> (el as? JsonArray)?.mapNotNull { it.jsonPrimitive.content.toIntOrNull() }?.toSet() } ?: emptySet<Int>()
-        val hasAlign = has("align"); val hasTxt = has("txt"); val hasSum = has("sum"); val hasQu = has("qu")
+        fun nums(k: String) = lIdx?.get(k)?.let { el -> (el as? JsonArray)?.mapNotNull { it.jsonPrimitive.content.toIntOrNull() }?.toSet() } ?: emptySet<Int>()
+        fun fmap(k: String) = (lIdx?.get(k) as? JsonObject)?.mapNotNull { (kk, v) ->
+            kk.toIntOrNull()?.let { it to v.jsonPrimitive.content }
+        }?.toMap() ?: emptyMap()
+        val fm = files.getOrPut(slug) { mutableMapOf() }
+        fm["align"] = fmap("af"); fm["txt"] = fmap("tf"); fm["sum"] = fmap("sumf"); fm["qu"] = fmap("quf")
+        val hasAlign = nums("align"); val hasTxt = nums("txt"); val hasSum = nums("sum"); val hasQu = nums("qu")
         val sheikh = sheikhNames[str(sJson["sheikh_slug"])] ?: str(sJson["sheikh"])
         val vids = mutableListOf<Video>(); val items = mutableListOf<String>()
         arr(sJson["lessons"]).forEach { l ->
             val o = l.jsonObject; val n = str(o["n"]).toIntOrNull() ?: return@forEach
             val id = "H:$slug:${num3(n)}"
             val has = buildList {
-                if (n in hasAlign || hasAlign.isEmpty() && lIdx == null) add("align")
+                if (n in hasAlign) add("align")
                 if (n in hasTxt) add("transcript")
                 if (n in hasSum) add("summary")
                 if (n in hasQu) add("questions")
@@ -89,14 +98,19 @@ object Haw {
         com.irth.mirath.store.Prefs.srcRev.value++
     }
 
-    fun paths(id: String): Pair<String, String>? {
+    /** اسم ملف الطبقة لدرس — من خرائط الفهرس، مع بديل %03d عند غيابها. */
+    private fun file(slug: String, n: Int, layer: String, suffix: String): String =
+        files[slug]?.get(layer)?.get(n) ?: "${num3(n)}.$suffix"
+
+    private fun pathOf(id: String): Pair<String, Int>? {
         if (!id.startsWith("H:")) return null
         val p = id.removePrefix("H:").split(":")
-        return p[0] to p[1]
+        return p[0] to (p.getOrNull(1)?.toIntOrNull() ?: return null)
     }
+
     suspend fun align(id: String): List<AWord> {
-        val (slug, nnn) = paths(id) ?: return emptyList()
-        val el = runCatching { getJson("/playlists/lessons/$slug/$nnn.align.json") }.getOrNull() ?: return emptyList()
+        val (slug, n) = pathOf(id) ?: return emptyList()
+        val el = runCatching { getJson("/playlists/lessons/$slug/${file(slug, n, "align", "align.json")}") }.getOrNull() ?: return emptyList()
         // أوقات الكلمات في هوشات مطلقة بالثواني (تحوي الإزاحة أصلاً) — لا تُضاف off
         val o = el.jsonObject
         return arr(o["w"]).mapNotNull { w ->
@@ -108,19 +122,19 @@ object Haw {
         }
     }
     suspend fun transcript(id: String): String {
-        val (slug, nnn) = paths(id) ?: return ""
-        return runCatching { get("/playlists/lessons/$slug/$nnn.txt") }.getOrDefault("")
+        val (slug, n) = pathOf(id) ?: return ""
+        return runCatching { get("/playlists/lessons/$slug/${file(slug, n, "txt", "txt")}") }.getOrDefault("")
     }
     suspend fun summary(id: String): Summary? {
-        val (slug, nnn) = paths(id) ?: return null
-        return runCatching { Api.decode<Summary>(getJson("/playlists/lessons/$slug/$nnn.sum.json")) }.getOrNull()
+        val (slug, n) = pathOf(id) ?: return null
+        return runCatching { Api.decode<Summary>(getJson("/playlists/lessons/$slug/${file(slug, n, "sum", "sum.json")}")) }.getOrNull()
     }
     suspend fun questions(id: String): List<QA> {
-        val (slug, nnn) = paths(id) ?: return emptyList()
+        val (slug, n) = pathOf(id) ?: return emptyList()
         return runCatching {
-            val o = getJson("/playlists/lessons/$slug/$nnn.qu.json").jsonObject
+            val o = getJson("/playlists/lessons/$slug/${file(slug, n, "qu", "qu.json")}").jsonObject
             val qaEl = o["qa"] ?: o["questions"] ?: return@runCatching emptyList()
-            Api.decode<Questions>(kotlinx.serialization.json.JsonObject(mapOf("questions" to qaEl))).questions
+            Api.decode<Questions>(JsonObject(mapOf("questions" to qaEl))).questions
         }.getOrDefault(emptyList())
     }
 }
