@@ -160,7 +160,7 @@ fun MiniPlayer(p: Pal, visible: Boolean, onOpen: (String) -> Unit) {
                     Icon(Icons.Filled.Replay10, "رجوع ١٠ ثوانٍ", tint = p.muted)
                 }
                 Box(
-                    Modifier.size(44.dp).clip(CircleShape).background(p.primary).clickable { Playback.toggle() }
+                    Modifier.size(48.dp).clip(CircleShape).background(p.primary).clickable { Playback.toggle() }
                         .semantics { contentDescription = if (playing) "إيقاف مؤقت" else "تشغيل" },
                     contentAlignment = Alignment.Center,
                 ) { Icon(if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow, null, tint = p.card, modifier = Modifier.size(26.dp)) }
