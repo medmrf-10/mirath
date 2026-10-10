@@ -117,8 +117,15 @@ object Haw {
         return p[0] to (p.getOrNull(1)?.toIntOrNull() ?: return null)
     }
 
+    /** يضمن امتلاء خريطة ملفات السلسلة قبل اختيار اسم الملف — يحمي من سباق prefetch. */
+    private suspend fun pathsOf(id: String): Pair<String, Int>? {
+        val (slug, n) = pathOf(id) ?: return null
+        if (files[slug] == null) runCatching { ensure("H:$slug") }
+        return slug to n
+    }
+
     suspend fun align(id: String): List<AWord> {
-        val (slug, n) = pathOf(id) ?: return emptyList()
+        val (slug, n) = pathsOf(id) ?: return emptyList()
         val el = runCatching { getJson("/playlists/lessons/$slug/${file(slug, n, "align", "align.json")}") }.getOrNull() ?: return emptyList()
         // أوقات الكلمات في هوشات مطلقة بالثواني (تحوي الإزاحة أصلاً) — لا تُضاف off
         val o = el.jsonObject
@@ -131,15 +138,15 @@ object Haw {
         }
     }
     suspend fun transcript(id: String): String {
-        val (slug, n) = pathOf(id) ?: return ""
+        val (slug, n) = pathsOf(id) ?: return ""
         return runCatching { get("/playlists/lessons/$slug/${file(slug, n, "txt", "txt")}") }.getOrDefault("")
     }
     suspend fun summary(id: String): Summary? {
-        val (slug, n) = pathOf(id) ?: return null
+        val (slug, n) = pathsOf(id) ?: return null
         return runCatching { Api.decode<Summary>(getJson("/playlists/lessons/$slug/${file(slug, n, "sum", "sum.json")}")) }.getOrNull()
     }
     suspend fun questions(id: String): List<QA> {
-        val (slug, n) = pathOf(id) ?: return emptyList()
+        val (slug, n) = pathsOf(id) ?: return emptyList()
         return runCatching {
             val o = getJson("/playlists/lessons/$slug/${file(slug, n, "qu", "qu.json")}").jsonObject
             val qaEl = o["qa"] ?: o["questions"] ?: return@runCatching emptyList()
