@@ -39,13 +39,15 @@ val SERIES_ICONS: List<Pair<String, ImageVector>> = listOf(
     "folder" to Icons.Filled.Folder,
     "mosque" to Icons.Filled.Home,
     "heart" to Icons.Filled.Favorite,
+    "map" to Icons.Filled.Map,
+    "route" to Icons.Filled.Route,
 )
 
 fun seriesIconOf(key: String): ImageVector =
     SERIES_ICONS.firstOrNull { it.first == key }?.second ?: Icons.Filled.MenuBook
 
 @Composable
-private fun IconPicker(p: Pal, sel: String, onSel: (String) -> Unit) {
+fun IconPicker(p: Pal, sel: String, onSel: (String) -> Unit) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         SERIES_ICONS.take(10).forEach { (k, ic) ->
             Box(
@@ -60,7 +62,7 @@ private fun IconPicker(p: Pal, sel: String, onSel: (String) -> Unit) {
 }
 
 @Composable
-private fun Field(p: Pal, v: String, hint: String, on: (String) -> Unit) {
+fun Field(p: Pal, v: String, hint: String, on: (String) -> Unit) {
     OutlinedTextField(
         value = v, onValueChange = on,
         placeholder = { Text(hint, fontSize = 13.sp, color = p.muted) },

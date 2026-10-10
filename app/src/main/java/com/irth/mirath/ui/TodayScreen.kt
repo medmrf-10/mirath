@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LocalFireDepartment
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.School
@@ -21,7 +22,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
 import com.irth.mirath.data.Repo
+import com.irth.mirath.data.Roadmaps
 import com.irth.mirath.data.Video
 import com.irth.mirath.store.Prefs
 import com.irth.mirath.ui.theme.Pal
@@ -32,8 +35,13 @@ import kotlin.math.abs
 fun TodayScreen(p: Pal, onLesson: (String) -> Unit, onBrowse: () -> Unit) {
     Prefs.streak.value // اشتراك إعادة التركيب عند تغيّر المواظبة
     val streak = Prefs.streakDays()
+    val ctx = LocalContext.current
     val vids = Repo.videos ?: emptyList()
     val series = Repo.series ?: emptyList()
+    // خريطتي النشطة: الأكثر تقدماً غير المكتملة، وإلا الأولى
+    val activeRm = Roadmaps.all(ctx).filter { it.steps.isNotEmpty() }
+        .sortedByDescending { Roadmaps.totals(it).first }
+        .firstOrNull { Roadmaps.totals(it).let { (d, a) -> d < a } }
 
     val ongoing = vids.filter { Prefs.ongoing(it.id, it.duration) }
     val resume = ongoing.firstOrNull { it.id == Prefs.last() } ?: ongoing.firstOrNull()
@@ -106,6 +114,33 @@ fun TodayScreen(p: Pal, onLesson: (String) -> Unit, onBrowse: () -> Unit) {
                     }
                     Spacer(Modifier.height(4.dp))
                     Text("$pct% — تبقّى ${fmtDur(resume.duration - Prefs.progress(resume.id))}", color = p.muted, fontSize = 12.sp)
+                }
+            }
+        }
+
+        if (activeRm != null) {
+            item {
+                val (rd, ra) = Roadmaps.totals(activeRm)
+                val nextId = Roadmaps.nextLesson(activeRm)
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(p.card)
+                        .clickable { nextId?.let(onLesson) }.padding(16.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Filled.Map, null, tint = p.gold, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("خريطتي — ${activeRm.title}", color = p.gold, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    nextId?.let { Repo.video(it) }?.let { nv ->
+                        Text("الدرس التالي: ${nv.title}", color = p.text, fontSize = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Box(Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(4.dp)).background(p.soft)) {
+                        Box(Modifier.fillMaxWidth(rd.toFloat() / ra.coerceAtLeast(1)).fillMaxHeight().background(p.gold))
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text("$rd/$ra درساً في المسار", color = p.muted, fontSize = 12.sp)
                 }
             }
         }

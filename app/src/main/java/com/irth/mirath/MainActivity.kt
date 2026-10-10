@@ -60,6 +60,7 @@ import kotlinx.serialization.Serializable
 @Serializable data class ScienceR(val id: String)
 @Serializable data class SeriesR(val id: String)
 @Serializable data class LessonR(val id: String)
+@Serializable data class RoadmapR(val id: String)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -122,7 +123,7 @@ fun MirathApp() {
                         p, title,
                         onTheme = { showTheme = true },
                         onSearch = { showSearch = true },
-                        onBack = if (route.contains("ScienceR") || route.contains("SeriesR") || route.contains("LessonR")) {
+                        onBack = if (route.contains("ScienceR") || route.contains("SeriesR") || route.contains("LessonR") || route.contains("RoadmapR")) {
                             { nav.popBackStack() }
                         } else null,
                     )
@@ -141,7 +142,7 @@ fun MirathApp() {
                             }
                         }
                         // mini-player — شريط المشغّل العالمي يتبعك في كل الشاشات
-                        if (G.videoId != null && !route.contains("LessonR")) {
+                        if (G.videoId != null && !route.contains("LessonR") || route.contains("RoadmapR")) {
                             Column(
                                 Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
                                     .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
@@ -211,7 +212,7 @@ fun MirathApp() {
                             HomeScreen(p, onScience = { nav.navigate(ScienceR(it)) }, onLesson = { nav.navigate(LessonR(it)) })
                         }
                         composable<Fav> { FavScreen(p) { id -> nav.navigate(LessonR(id)) } }
-                        composable<Lib> { LibraryScreen(p, onSeries = { nav.navigate(SeriesR(it)) }) }
+                        composable<Lib> { LibraryScreen(p, onSeries = { nav.navigate(SeriesR(it)) }, onRoadmap = { nav.navigate(RoadmapR(it)) }) }
                         composable<Stats> { StatsScreen(p) }
                         composable<ScienceR> { e ->
                             val r = e.toRoute<ScienceR>()
@@ -224,6 +225,10 @@ fun MirathApp() {
                         composable<LessonR> { e ->
                             val r = e.toRoute<LessonR>()
                             LessonScreen(p, r.id, onLesson = { nav.navigate(LessonR(it)) { launchSingleTop = true } })
+                        }
+                        composable<RoadmapR> { e ->
+                            val r = e.toRoute<RoadmapR>()
+                            RoadmapScreen(p, ctx, r.id, onBack = { nav.popBackStack() }, onSeries = { nav.navigate(SeriesR(it)) }, onLesson = { nav.navigate(LessonR(it)) })
                         }
                     }
                 }
