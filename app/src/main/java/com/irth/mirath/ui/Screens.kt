@@ -124,6 +124,9 @@ fun ScienceScreen(p: Pal, scienceId: String, onSeries: (String) -> Unit, onLesso
     val science = Repo.sciences?.firstOrNull { it.id == scienceId }
     val series = Repo.seriesOfScience(scienceId)
     val works = Repo.worksOfScience(scienceId)
+    val scope = rememberCoroutineScope()
+    var dlMsg by remember { mutableStateOf<String?>(null) }
+    var dlBusy by remember { mutableStateOf(false) }
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         item {
             Column(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -133,6 +136,28 @@ fun ScienceScreen(p: Pal, scienceId: String, onSeries: (String) -> Unit, onLesso
                         contentScale = androidx.compose.ui.layout.ContentScale.Crop)
                 }
                 Text(science?.name ?: "", style = MaterialTheme.typography.displayLarge, color = p.text)
+                if (scienceId.startsWith("H:")) {
+                    TextButton(
+                        onClick = {
+                            dlBusy = true
+                            scope.launch {
+                                var done = 0; var tot = 0
+                                for (sr in series) {
+                                    runCatching { Haw.ensure(sr.id) }
+                                    val items = Repo.seriesOf(sr.id)?.items ?: continue
+                                    tot += items.size
+                                    for (vid in items) {
+                                        runCatching { Repo.transcript(vid); Repo.summary(vid); Repo.align(vid) }
+                                        done++; dlMsg = "نزّل $done درساً…"
+                                    }
+                                }
+                                dlBusy = false
+                                dlMsg = "كل طبقات الشيخ بلا نت ($tot درساً)"
+                            }
+                        },
+                        enabled = !dlBusy,
+                    ) { Text(dlMsg ?: "نزّل كل الطبقات", color = if (dlBusy) p.muted else p.gold, fontSize = 13.sp) }
+                }
             }
         }
         if (works.isNotEmpty()) {
