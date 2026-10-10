@@ -141,6 +141,19 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
                 item {
                     Spacer(Modifier.height(10.dp))
                     GSurface(G.local, p)
+                    // شريط التقدم — اسحب للقفز لأي موضع
+                    if (G.dur > 0) {
+                        Slider(
+                            value = (pos / G.dur).toFloat().coerceIn(0f, 1f),
+                            onValueChange = { ctl.seek(it.toDouble() * G.dur) },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = SliderDefaults.colors(thumbColor = p.gold, activeTrackColor = p.gold, inactiveTrackColor = p.soft),
+                        )
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(fmtDur(pos.toInt()), color = p.muted, fontSize = 11.sp)
+                            Text(fmtDur(G.dur.toInt()), color = p.muted, fontSize = 11.sp)
+                        }
+                    }
                     Spacer(Modifier.height(10.dp))
 
                     // المسرح الحي — الجملة الحالية بالكشف الذهبي

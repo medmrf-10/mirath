@@ -169,6 +169,9 @@ setInterval(function(){try{if(pl&&pl.getCurrentTime)window.ct=pl.getCurrentTime(
                         if (st == 0 && !endedFired) { endedFired = true; onEnded() }
                         if (st == 1) endedFired = false
                     }
+                    webView?.evaluateJavascript("try{pl?pl.getDuration():0}catch(e){0}") { v ->
+                        v?.removeSurrounding("\"")?.toDoubleOrNull()?.let { if (it > 0) dur = it }
+                    }
                 }
                 PlayerService.refresh(ctxRef)
                 if (videoId != null) handler.postDelayed(this, 300) else ticking = false
