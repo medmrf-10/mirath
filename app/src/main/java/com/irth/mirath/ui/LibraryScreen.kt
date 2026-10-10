@@ -173,7 +173,7 @@ fun LibraryScreen(p: Pal, onSeries: (String) -> Unit) {
                 }
             }
             items(list, key = { it.id }) { s ->
-                val hasMedia = LocalLib.seriesHasMedia(s.id)
+                val hasMedia = LocalLib.seriesHasMedia(s.id, s.items)
                 Row(
                     Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(14.dp))
                         .background(p.card).border(1.dp, p.line, RoundedCornerShape(14.dp))

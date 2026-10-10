@@ -35,7 +35,7 @@ object LocalLib {
             if (File(d, "series.json").exists() || (depth == 1 && kids.isNotEmpty())) { out += d; return }
             if (depth < 5) kids.forEach { scan(it, depth + 1) }
         }
-        r.listFiles()?.filter { it.isDirectory }?.forEach { scan(it, 1) }
+        r.listFiles()?.filter { it.isDirectory && !it.name.startsWith(".") }?.forEach { scan(it, 1) }
         return out.sortedBy { it.relativeTo(r).path }
     }
 
@@ -118,19 +118,61 @@ object LocalLib {
     fun mediaFile(slug: String, lid: String): File? =
         ld(slug, lid).listFiles()?.firstOrNull { it.name.startsWith("media.") && it.extension.lowercase() in listOf("mp3", "m4a", "wav", "ogg", "mp4", "webm", "mkv") }
 
+    /** وسائط مرتبطة بدروس الكتالوج البعيد: imports/.link/<videoId>/media.* */
+    private fun linkDir(vid: String) = File(root, ".link/$vid")
+
     fun mediaFor(id: String): File? {
+        if (!id.startsWith("L:"))
+            return linkDir(id).listFiles()?.firstOrNull { it.name.startsWith("media.") }
         val raw = id.removePrefix("L:")
         val slug = raw.substringBeforeLast("/", "")
         val lid = raw.substringAfterLast("/", "")
         return if (slug.isEmpty() || lid.isEmpty()) null else mediaFile(slug, lid)
     }
 
-    /** هل للسلسلة (أي درس) وسائط محلية تسمح بوضع «محلي»؟ */
-    fun seriesHasMedia(seriesId: String): Boolean {
+    /** هل للسلسلة وسائط محلية تسمح بوضع «محلي»؟ items لازمة لسلاسل الكتالوج. */
+    fun seriesHasMedia(seriesId: String, items: List<String> = emptyList()): Boolean {
+        if (!seriesId.startsWith("L:"))
+            return items.any { linkDir(it).listFiles()?.any { f -> f.name.startsWith("media.") } == true }
         val sd = dirOf(seriesId.removePrefix("L:"))
         return sd.listFiles()?.filter { it.isDirectory }?.any { c ->
             c.listFiles()?.any { it.name.startsWith("media.") } == true
         } == true
+    }
+
+    private fun isMediaName(name: String): Boolean =
+        name.substringAfterLast('.', "").lowercase() in listOf("mp3", "m4a", "wav", "ogg", "mp4", "webm", "mkv")
+
+    private fun naturalKey(name: String): String =
+        name.lowercase().replace(Regex("\\d+")) { it.value.padStart(8, '0') }
+
+    /**
+     * الأوفلاين بالعدد (بأمر محمد): اختيار مجلد فيه وسائط مساوية عدد دروس السلسلة ← ربط آلي بالترتيب.
+     * يعيد: n مرتبطة | 0 لا وسائط | -1 عدد غير مطابق.
+     */
+    suspend fun autoLinkFolder(ctx: Context, seriesId: String, items: List<String>, uri: Uri): Int = withContext(Dispatchers.IO) {
+        val doc = DocumentFile.fromTreeUri(ctx, uri) ?: return@withContext 0
+        val media = mutableListOf<DocumentFile>()
+        fun walk(d: DocumentFile) {
+            d.listFiles().forEach { if (it.isDirectory) walk(it) else if (isMediaName(it.name ?: "")) media += it }
+        }
+        walk(doc)
+        if (media.isEmpty()) return@withContext 0
+        media.sortBy { naturalKey(it.name ?: "") }
+        if (media.size != items.size) return@withContext -1
+        var n = 0
+        items.forEachIndexed { i, vid ->
+            val f = media[i]
+            val ext = (f.name ?: "media.mp3").substringAfterLast('.')
+            val out = if (vid.startsWith("L:")) File(root, "${vid.removePrefix("L:")}/media.$ext")
+                      else File(linkDir(vid), "media.$ext")
+            out.parentFile?.mkdirs()
+            runCatching {
+                ctx.contentResolver.openInputStream(f.uri)?.use { ins -> out.outputStream().use { ins.copyTo(it) } }
+                n++
+            }
+        }
+        n
     }
 
     fun totalBytes(): Long = root?.walkTopDown()?.filter { it.isFile }?.sumOf { it.length() } ?: 0

@@ -1,6 +1,8 @@
 package com.irth.mirath.ui
 
 import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -13,6 +15,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.FormatListBulleted
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
@@ -33,6 +36,7 @@ import com.irth.mirath.data.LocalLib
 import com.irth.mirath.data.Repo
 import com.irth.mirath.store.Prefs
 import com.irth.mirath.ui.theme.Pal
+import kotlinx.coroutines.launch
 
 private fun progressBar(id: String, duration: Int): Float {
     val pv = Prefs.progress(id)
@@ -151,7 +155,24 @@ fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit) {
     val s = Repo.seriesOf(seriesId)
     if (s == null) { EmptyBox(p, "السلسلة غير موجودة"); return }
     val ctx = LocalContext.current
-    val hasMedia = remember(seriesId, Prefs.srcRev.value) { LocalLib.seriesHasMedia(seriesId) }
+    val scope = rememberCoroutineScope()
+    var linkMsg by remember { mutableStateOf<String?>(null) }
+    var linkBusy by remember { mutableStateOf(false) }
+    val hasMedia = remember(seriesId, Prefs.srcRev.value) { LocalLib.seriesHasMedia(seriesId, s.items) }
+    val pickLink = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { u ->
+        u?.let {
+            scope.launch {
+                linkBusy = true
+                val n = LocalLib.autoLinkFolder(ctx, seriesId, s.items, it)
+                linkMsg = when {
+                    n > 0 -> { Prefs.setSrc(seriesId, "local"); "رُبط $n ملف وسائط — وضع «محلي» مفعّل بلا نت" }
+                    n == -1 -> "عدد ملفات المجلد لا يساوي عدد الدروس (${s.items.size})"
+                    else -> "لا ملفات وسائط في المجلد المختار"
+                }
+                linkBusy = false
+            }
+        }
+    }
     val cont = s.items.firstOrNull { vid -> Repo.video(vid)?.let { Prefs.ongoing(vid, it.duration) } == true }
     val finN = s.items.count { vid -> Repo.video(vid)?.let { Prefs.finished(vid, it.duration) } == true }
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
@@ -196,6 +217,15 @@ fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit) {
                 }
                 Spacer(Modifier.width(8.dp))
                 OutlinedButton(
+                    onClick = { pickLink.launch(null) },
+                    modifier = Modifier.size(44.dp), shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = if (hasMedia) p.gold else p.muted),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, if (hasMedia) p.gold else p.soft),
+                    enabled = !linkBusy,
+                    contentPadding = PaddingValues(0.dp),
+                ) { Icon(Icons.Filled.Link, "اربط مجلد أوفلاين", tint = if (hasMedia) p.gold else p.muted, modifier = Modifier.size(18.dp)) }
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(
                     onClick = {
                         val send = Intent(Intent.ACTION_SEND).apply {
                             type = "text/plain"
@@ -209,6 +239,8 @@ fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit) {
                     contentPadding = PaddingValues(0.dp),
                 ) { Icon(Icons.Filled.Share, "مشاركة السلسلة", tint = p.muted, modifier = Modifier.size(18.dp)) }
             }
+            if (linkBusy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 6.dp), color = p.gold, trackColor = p.soft)
+            linkMsg?.let { Text(it, color = p.gold, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp)) }
         }
         itemsIndexed(s.items) { i, vid ->
             val v = Repo.video(vid) ?: return@itemsIndexed
