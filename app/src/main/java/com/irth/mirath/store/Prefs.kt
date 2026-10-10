@@ -148,6 +148,10 @@ object Prefs {
             ?.filterValues { it.isNotEmpty() } ?: emptyMap()
 
     /** مصدر تشغيل السلسلة: "yt" يوتيوب (افتراضي) أو "local" وسائط منزّلة. */
+    /** مفاتيح نصية عامة (توكن مزامنة، هوية المستخدم). */
+    fun str(k: String): String = sp?.getString("k.$k", "") ?: ""
+    fun putStr(k: String, v: String) { sp?.edit()?.putString("k.$k", v)?.apply() }
+
     fun src(seriesId: String): String = sp?.getString("src.$seriesId", "yt") ?: "yt"
     fun setSrc(seriesId: String, v: String) {
         sp?.edit()?.putString("src.$seriesId", v)?.apply()

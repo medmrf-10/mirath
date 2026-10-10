@@ -10,8 +10,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
@@ -31,6 +33,7 @@ import com.irth.mirath.data.Backup
 import com.irth.mirath.data.LocalLib
 import com.irth.mirath.data.Repo
 import com.irth.mirath.data.Roadmaps
+import com.irth.mirath.data.Sync
 import com.irth.mirath.ui.theme.Pal
 import kotlinx.coroutines.launch
 
@@ -50,6 +53,8 @@ fun LibraryScreen(p: Pal, onSeries: (String) -> Unit, onRoadmap: (String) -> Uni
     var createUrl by remember { mutableStateOf("") }
     var editId by remember { mutableStateOf<String?>(null) }
     var showRm by remember { mutableStateOf(false) }
+    var signed by remember { mutableStateOf(Sync.signedIn()) }
+    var authCode by remember { mutableStateOf<Sync.DeviceCode?>(null) }
     val local = remember(rev) { LocalLib.localSeries() }
     val rms = remember(rev) { Roadmaps.all(ctx) }
 
@@ -137,6 +142,76 @@ fun LibraryScreen(p: Pal, onSeries: (String) -> Unit, onRoadmap: (String) -> Uni
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = p.muted),
                     border = androidx.compose.foundation.BorderStroke(1.dp, p.soft),
                 ) { Icon(Icons.Filled.FolderOpen, null, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(6.dp)); Text("استعد نسخة", fontSize = 13.sp) }
+            }
+
+            // حسابي — دخول GitHub (Device Flow) ومزامنة ملفات المستخدم
+            Text(
+                "حسابي — مزامنة سلاسلك وتقدمك مع GitHub",
+                color = p.gold, style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.padding(top = 18.dp, bottom = 8.dp),
+            )
+            authCode?.let { dc ->
+                Column(
+                    Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(14.dp))
+                        .background(p.card).border(1.dp, p.gold, RoundedCornerShape(14.dp)).padding(14.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text("افتح الرابط وأدخل الرمز:", color = p.muted, fontSize = 12.sp)
+                    Text(dc.userCode, color = p.gold, fontSize = 26.sp, modifier = Modifier.padding(vertical = 6.dp))
+                    Text(dc.verifyUrl, color = p.text, fontSize = 13.sp)
+                    OutlinedButton(
+                        onClick = { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(dc.verifyUrl))) },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp).height(40.dp),
+                        shape = RoundedCornerShape(12.dp),
+                    ) { Text("افتح صفحة التفعيل", fontSize = 13.sp) }
+                    Text("ينتظر إدخالك الرمز…", color = p.muted, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
+                }
+            }
+            if (Sync.clientId.isEmpty()) {
+                Text("مزامنة الريبو تنتظر معرّف تطبيق GitHub — الدخول بجوجل في الطريق", color = p.muted, fontSize = 12.sp)
+            } else if (!signed) {
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            busy = true; authCode = Sync.startAuth(); busy = false
+                            authCode?.let { dc ->
+                                scope.launch {
+                                    val t = Sync.pollToken(dc); authCode = null
+                                    signed = Sync.signedIn()
+                                    msg = if (t != null) "سُجّل الدخول — المزامنة جاهزة" else "لم يكتمل الدخول"
+                                }
+                            } ?: run { msg = "تعذر بدء الدخول" }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp).height(46.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = p.gold),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, p.line),
+                ) {
+                    Icon(Icons.Filled.AccountCircle, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp)); Text("دخول بحساب GitHub", fontSize = 14.sp)
+                }
+            } else {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { scope.launch { busy = true; val n = Sync.push(ctx); msg = if (n >= 0) "رُفعت $n ملفاً لحسابك" else "تعذر الرفع"; busy = false } },
+                        modifier = Modifier.weight(1f).height(44.dp), shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = p.gold),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, p.line),
+                    ) { Icon(Icons.Filled.CloudUpload, null, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(6.dp)); Text("رفع", fontSize = 13.sp) }
+                    OutlinedButton(
+                        onClick = { scope.launch { busy = true; val n = Sync.pull(ctx); rev++; msg = if (n >= 0) "سُحبت $n ملفاً من حسابك" else "تعذر السحب"; busy = false } },
+                        modifier = Modifier.weight(1f).height(44.dp), shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = p.text),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, p.line),
+                    ) { Icon(Icons.Filled.CloudDownload, null, modifier = Modifier.size(17.dp)); Spacer(Modifier.width(6.dp)); Text("سحب", fontSize = 13.sp) }
+                    OutlinedButton(
+                        onClick = { Sync.signOut(); signed = false; msg = "سُجّل الخروج" },
+                        modifier = Modifier.weight(0.7f).height(44.dp), shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = p.muted),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, p.soft),
+                    ) { Text("خروج", fontSize = 13.sp) }
+                }
             }
 
             Text(
