@@ -100,6 +100,8 @@ object LocalLib {
     private fun ld(slug: String, lid: String): File = File(root, "$slug/$lid")
 
     private fun file(id: String, name: String): File? {
+        // دروس الكتالوج تقرأ ملفاتها الملحقة محلياً من .link/<vid>/
+        if (!id.startsWith("L:")) return File(linkDir(id), name).takeIf { it.exists() }
         val raw = id.removePrefix("L:")
         val slug = raw.substringBeforeLast("/", "") // مسار السلسلة وقد يكون متداخلاً «مجلد/سلسلة»
         val lid = raw.substringAfterLast("/", "")
@@ -324,6 +326,31 @@ object LocalLib {
             ctx.contentResolver.openInputStream(uri)?.use { i -> out.outputStream().use { i.copyTo(it) } }
         }.isSuccess
     }
+
+    /** إرفاق ملف بدرس من الكتالوج — يُحفظ ظلّاً في .link/<vid>/ ويحجب/يكمل بيانات الشبكة. */
+    suspend fun attachToCatalog(ctx: Context, vid: String, uri: Uri): Boolean = withContext(Dispatchers.IO) {
+        val d = DocumentFile.fromSingleUri(ctx, uri) ?: return@withContext false
+        val (_, canon) = classify(d.name ?: return@withContext false)
+        if (canon == "yt.txt") return@withContext false
+        val out = File(linkDir(vid), canon)
+        out.parentFile?.mkdirs()
+        runCatching {
+            ctx.contentResolver.openInputStream(uri)?.use { i -> out.outputStream().use { i.copyTo(it) } }
+        }.isSuccess
+    }
+
+    /** أنواع الملفات الملحقة محلياً بدرس كتالوج (.link/<vid>/) — تُدمج في أعلام has. */
+    fun shadowKinds(vid: String): List<String> =
+        (linkDir(vid).listFiles() ?: emptyArray()).mapNotNull { f ->
+            when {
+                f.name == "transcript.txt" -> "transcript"
+                f.name == "align.json" -> "align"
+                f.name == "summary.json" -> "summary"
+                f.name == "questions.json" -> "questions"
+                f.name.startsWith("media.") -> "media"
+                else -> null
+            }
+        }
 
     /** تصنيف اسم ملف إلى (مفتاح الدرس, الاسم القياسي). */
     fun classify(name: String): Pair<String, String> {

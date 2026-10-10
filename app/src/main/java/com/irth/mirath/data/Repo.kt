@@ -38,6 +38,13 @@ object Repo {
         localOn = ls.isNotEmpty()
         series = (series ?: emptyList()) + ls
         videos = (videos ?: emptyList()) + lv
+        // دمج أنواع الملفات الملحقة محلياً بدروس الكتالوج في أعلام has
+        videos = videos?.map { v ->
+            if (v.id.startsWith("L:")) v else {
+                val extra = LocalLib.shadowKinds(v.id).filter { it !in v.has }
+                if (extra.isEmpty()) v else v.copy(has = v.has + extra)
+            }
+        }
         LocalLib.localScience()?.let { s ->
             if (sciences?.none { it.id == s.id } == true) sciences = sciences!! + s
         }

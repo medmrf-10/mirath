@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -175,6 +176,18 @@ fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit, onExam: (
             }
         }
     }
+    // إرفاق ملف بدرس محدد — سهل وبسيط كما أمر محمد: أيقونة مشبك على كل درس
+    var attachFor by remember { mutableStateOf<String?>(null) }
+    val attachPick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
+        val tgt = attachFor
+        if (u != null && tgt != null) scope.launch {
+            val ok = if (seriesId.startsWith("L:")) {
+                LocalLib.attachTo(ctx, seriesId, tgt.removePrefix("L:").substringAfterLast("/"), u)
+            } else LocalLib.attachToCatalog(ctx, tgt, u)
+            if (ok) { Repo.mergeLocal(); Prefs.srcRev.value++; linkMsg = "أُلحق الملف بالدرس" }
+            else linkMsg = "تعذّر إرفاق الملف"
+        }
+    }
     val cont = s.items.firstOrNull { vid -> Repo.video(vid)?.let { Prefs.ongoing(vid, it.duration) } == true }
     val finN = s.items.count { vid -> Repo.video(vid)?.let { Prefs.finished(vid, it.duration) } == true }
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
@@ -275,11 +288,16 @@ fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit, onExam: (
                 bar = if (ong && !fin) progressBar(vid, v.duration) else 0f,
                 leading = { PhIcon(p, "${i + 1}", done = fin) },
                 trailing = {
-                    IconButton(onClick = { Prefs.toggleFav(vid) }) {
-                        Icon(
-                            if (Prefs.isFav(vid)) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                            null, tint = if (Prefs.isFav(vid)) p.gold else p.muted,
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { attachFor = vid; attachPick.launch(arrayOf("*/*")) }) {
+                            Icon(Icons.Filled.AttachFile, "أرفق ملفاً بهذا الدرس", tint = p.muted, modifier = Modifier.size(20.dp))
+                        }
+                        IconButton(onClick = { Prefs.toggleFav(vid) }) {
+                            Icon(
+                                if (Prefs.isFav(vid)) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                                null, tint = if (Prefs.isFav(vid)) p.gold else p.muted,
+                            )
+                        }
                     }
                 },
                 onClick = { onLesson(vid) },
