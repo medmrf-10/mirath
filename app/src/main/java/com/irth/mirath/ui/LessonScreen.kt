@@ -33,9 +33,8 @@ import com.irth.mirath.data.LocalLib
 import com.irth.mirath.data.Repo
 import com.irth.mirath.data.Summary
 import com.irth.mirath.data.buildPhrases
-import com.irth.mirath.player.YtCtl
-import com.irth.mirath.player.LocalPlayer
-import com.irth.mirath.player.YtPlayer
+import androidx.compose.ui.viewinterop.AndroidView
+import com.irth.mirath.player.G
 import com.irth.mirath.store.Prefs
 import com.irth.mirath.ui.theme.Amiri
 import com.irth.mirath.ui.theme.Pal
@@ -66,20 +65,34 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
     var questions by remember { mutableStateOf<List<QA>?>(null) }
     var pos by remember { mutableStateOf(Prefs.progress(videoId).toDouble()) }
     var dur by remember { mutableStateOf(v.duration.toDouble()) }
-    var playing by remember { mutableStateOf(false) }
+    val playing = G.playing
     var curPh by remember { mutableStateOf(0) }
     var spdI by remember { mutableStateOf(0) }
     var slpI by remember { mutableStateOf(-1) }
     var showDrawer by remember { mutableStateOf(false) }
-    val ctl = remember { YtCtl() }
+    val ctl = G  // مقبض المشغّل العالمي — نفس عقد YtCtl أسمائياً
     val scope = rememberCoroutineScope()
     val ser = remember(videoId) { Repo.series?.firstOrNull { it.items.contains(videoId) } }
     val media = remember(videoId, Prefs.srcRev.value) {
         LocalLib.mediaFor(videoId)?.takeIf { v.yt.isEmpty() || Prefs.src(ser?.id ?: "") == "local" }
     }
 
+    DisposableEffect(Unit) {
+        G.onTime = { t -> pos = t }
+        onDispose { G.onTime = {} }
+    }
     LaunchedEffect(videoId) {
         Prefs.markOpened(videoId)
+        G.play(ctx, videoId, v.title, v.yt, media, Prefs.progress(videoId).toInt()) {
+            Prefs.setProgress(videoId, 0)
+            if (ser != null) {
+                val idx = ser.items.indexOf(videoId)
+                val next = ser.items.drop(idx + 1).firstOrNull { nid ->
+                    Repo.video(nid)?.let { !Prefs.finished(nid, it.duration) } == true
+                }
+                if (next != null) onLesson(next)
+            }
+        }
         if (v.has.contains("align")) {
             runCatching {
                 val ws = Repo.align(videoId)
@@ -121,32 +134,7 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
             "live" -> LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
                 item {
                     Spacer(Modifier.height(10.dp))
-                    if (media != null) LocalPlayer(media, ctl, Prefs.progress(videoId).toInt(),
-                        onEnded = {
-                            Prefs.setProgress(videoId, 0)
-                            if (ser != null) {
-                                val idx = ser.items.indexOf(videoId)
-                                val next = ser.items.drop(idx + 1).firstOrNull { nid ->
-                                    Repo.video(nid)?.let { !Prefs.finished(nid, it.duration) } == true
-                                }
-                                if (next != null) onLesson(next)
-                            }
-                        },
-                        onState = { playing = it == 1 }, p = p,
-                    ) { t -> pos = t }
-                    else YtPlayer(v.yt, ctl, Prefs.progress(videoId),
-                        onEnded = {
-                            Prefs.setProgress(videoId, 0)
-                            if (ser != null) {
-                                val idx = ser.items.indexOf(videoId)
-                                val next = ser.items.drop(idx + 1).firstOrNull { nid ->
-                                    Repo.video(nid)?.let { !Prefs.finished(nid, it.duration) } == true
-                                }
-                                if (next != null) onLesson(next)
-                            }
-                        },
-                        onState = { playing = it == 1 },
-                    ) { t -> pos = t }
+                    GSurface(G.local, p)
                     Spacer(Modifier.height(10.dp))
 
                     // المسرح الحي — الجملة الحالية بالكشف الذهبي
@@ -219,7 +207,7 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
                                 ctx.startActivity(Intent.createChooser(send, "مشاركة"))
                             }
                             ChipBtn(p, "×${SPEEDS[spdI].let { if (it % 1.0 == 0.0) it.toInt().toString() else it.toString() }}", spdI != 0) {
-                                spdI = (spdI + 1) % SPEEDS.size; ctl.rate(SPEEDS[spdI])
+                                spdI = (spdI + 1) % SPEEDS.size; ctl.setRate(SPEEDS[spdI])
                             }
                             ChipBtn(p, if (slpI >= 0) "نوم ${SLEEPS[slpI]}" else "نوم", slpI >= 0) {
                                 slpI = (slpI + 1) % (SLEEPS.size + 1)
@@ -418,5 +406,37 @@ private fun QCard(p: Pal, videoId: String, i: Int, qa: QA) {
                 }
             }
         }
+    }
+}
+
+
+/** سطح المشغّل في صفحة الدرس: WebView يوتيوب المشترك يُرفَع هنا أثناء العرض (يعود خفياً عند الخروج)، أو واجهة صوتية للمحلي. */
+@Composable
+fun GSurface(local: Boolean, p: Pal) {
+    if (local) {
+        Box(
+            Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(16.dp)).background(p.soft),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(Modifier.size(64.dp).clip(CircleShape).background(p.gold.copy(alpha = 0.15f)), contentAlignment = Alignment.Center) {
+                    Text("♪", color = p.gold, fontSize = 30.sp)
+                }
+                Spacer(Modifier.height(10.dp))
+                Text("صوت محلي — يُشغَّل دون إنترنت", color = p.muted, style = MaterialTheme.typography.labelMedium)
+            }
+        }
+    } else {
+        AndroidView(
+            factory = { ctx ->
+                android.widget.FrameLayout(ctx).apply {
+                    G.webView?.let { wv ->
+                        (wv.parent as? android.view.ViewGroup)?.removeView(wv)
+                        addView(wv, android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT))
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(16.dp)).background(androidx.compose.ui.graphics.Color.Black),
+        )
     }
 }

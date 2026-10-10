@@ -16,8 +16,20 @@ import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
@@ -30,6 +42,7 @@ import androidx.navigation.toRoute
 import com.irth.mirath.data.Api
 import com.irth.mirath.data.Repo
 import com.irth.mirath.data.LocalLib
+import com.irth.mirath.player.G
 import com.irth.mirath.data.Update
 import com.irth.mirath.store.Prefs
 import com.irth.mirath.ui.*
@@ -124,6 +137,35 @@ fun MirathApp() {
                                 TextButton(onClick = { Update.download(ctx, u, "mirath") }) { Text("نزّل الآن", color = p.primary) }
                             }
                         }
+                        // mini-player — شريط المشغّل العالمي يتبعك في كل الشاشات
+                        if (G.videoId != null && !route.contains("LessonR")) {
+                            Column(
+                                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
+                                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+                                    .background(p.card)
+                                    .clickable { G.videoId?.let { nav.navigate(LessonR(it)) } }
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                            ) {
+                                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                    Icon(
+                                        if (G.playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                                        null, tint = p.gold,
+                                        modifier = Modifier.size(30.dp).clickable { G.playPause() },
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(G.title, color = p.text, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+                                        if (G.dur > 0) Text(fmtT(G.pos) + " / " + fmtT(G.dur), color = p.muted, style = MaterialTheme.typography.labelSmall)
+                                    }
+                                    IconButton(onClick = { G.stopAll() }) {
+                                        Icon(Icons.Filled.Close, "إيقاف", tint = p.muted, modifier = Modifier.size(18.dp))
+                                    }
+                                }
+                                if (G.dur > 0) Box(Modifier.fillMaxWidth().padding(top = 6.dp).height(3.dp).background(p.soft, androidx.compose.foundation.shape.RoundedCornerShape(3.dp))) {
+                                    Box(Modifier.fillMaxWidth((G.pos / G.dur).toFloat().coerceIn(0f, 1f)).fillMaxHeight().background(p.gold, androidx.compose.foundation.shape.RoundedCornerShape(3.dp)))
+                                }
+                            }
+                        }
                         NavigationBar(containerColor = p.bg, contentColor = p.muted) {
                         NavItem(p, route.contains("Home") || route.isEmpty(), "الرئيسية", Icons.Filled.Home) {
                             nav.navigate(Home) { popUpTo(Home) { inclusive = true } }
@@ -207,4 +249,8 @@ private fun RowScope.NavItem(p: com.irth.mirath.ui.theme.Pal, on: Boolean, label
             indicatorColor = p.soft,
         ),
     )
+}
+
+private fun fmtT(sec: Double): String {
+    val t = sec.toInt(); return "%d:%02d".format(t / 60, t % 60)
 }
