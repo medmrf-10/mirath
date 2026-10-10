@@ -179,7 +179,7 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
                                         val st = wordStyle(p, w, ph, pos, k)
                                         Text(
                                             w.w,
-                                            style = MaterialTheme.typography.headlineSmall.copy(fontFamily = Amiri, fontSize = 26.sp, lineHeight = 40.sp),
+                                            style = MaterialTheme.typography.headlineSmall.copy(fontFamily = Amiri, fontSize = (26 * Prefs.fontScale.value).sp, lineHeight = (40 * Prefs.fontScale.value).sp),
                                             color = st.first,
                                             modifier = Modifier
                                                 .alpha(st.second)
@@ -264,23 +264,28 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
                     Spacer(Modifier.height(40.dp))
                 }
             }
-            "read" -> LazyColumn(Modifier.fillMaxSize().padding(16.dp)) {
+            "read", "sum" -> LazyColumn(Modifier.fillMaxSize().padding(16.dp)) {
                 item {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        ChipBtn(p, "أ−", Prefs.fontScale.value > 0.8f) { Prefs.setFontScale((Prefs.fontScale.value - 0.1f).coerceAtLeast(0.7f)) }
+                        Spacer(Modifier.width(6.dp))
+                        ChipBtn(p, "أ+", Prefs.fontScale.value < 1.8f) { Prefs.setFontScale((Prefs.fontScale.value + 0.1f).coerceAtMost(2f)) }
+                    }
+                }
+                if (mode == "read") item {
                     val t = transcript
                     if (t == null) LoadingBox(p)
-                    else Text(t, color = p.text, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Justify, lineHeight = 32.sp)
+                    else Text(t, color = p.text, style = MaterialTheme.typography.bodyLarge.copy(fontSize = (17 * Prefs.fontScale.value).sp, lineHeight = (32 * Prefs.fontScale.value).sp), textAlign = TextAlign.Justify)
                 }
-            }
-            "sum" -> LazyColumn(Modifier.fillMaxSize().padding(16.dp)) {
-                item {
+                else item {
                     val s = summary
                     if (s == null) LoadingBox(p)
                     else Column {
-                        Text(s.summary, color = p.text, style = MaterialTheme.typography.bodyLarge, lineHeight = 30.sp)
+                        Text(s.summary, color = p.text, style = MaterialTheme.typography.bodyLarge.copy(fontSize = (17 * Prefs.fontScale.value).sp, lineHeight = (30 * Prefs.fontScale.value).sp))
                         s.points.forEach { pt ->
                             Row(Modifier.padding(top = 10.dp)) {
                                 Text("•", color = p.gold, modifier = Modifier.padding(end = 8.dp))
-                                Text(pt, color = p.muted, style = MaterialTheme.typography.bodyLarge)
+                                Text(pt, color = p.muted, style = MaterialTheme.typography.bodyLarge.copy(fontSize = (17 * Prefs.fontScale.value).sp))
                             }
                         }
                     }

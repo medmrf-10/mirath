@@ -20,6 +20,7 @@ object Prefs {
     val favs = mutableStateOf<Set<String>>(emptySet())
     val recent = mutableStateOf<List<String>>(emptyList())
     val qrate = mutableStateOf<Map<String, Int>>(emptyMap())
+    val fontScale = mutableStateOf(1f)
 
     fun init(ctx: Context) {
         if (sp != null) return
@@ -31,11 +32,17 @@ object Prefs {
             .split(",").filter { it.contains(":") }
             .associate { it.substringBefore(":") to (it.substringAfter(":").toIntOrNull() ?: 0) }
         streak.value = sp!!.getInt("streak", 0)
+        fontScale.value = sp!!.getFloat("fontScale", 1f)
     }
 
     fun setTheme(t: String) {
         theme.value = t
         sp?.edit()?.putString("theme", t)?.apply()
+    }
+
+    fun setFontScale(f: Float) {
+        fontScale.value = f
+        sp?.edit()?.putFloat("fontScale", f)?.apply()
     }
 
     fun isFav(id: String) = favs.value.contains(id)
