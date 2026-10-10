@@ -141,6 +141,7 @@ object Sync {
     /** تنزيل كل ملفات المستخدم من الريبو → imports/ + roadmaps + prefs. يرجع عدد المستعاد. */
     suspend fun pull(ctx: Context): Int = withContext(Dispatchers.IO) {
         if (token().isEmpty()) return@withContext -1
+        if (Prefs.str("gh.user").isEmpty()) Prefs.putStr("gh.user", ghUser())
         val base = userRoot(ctx)
         var n = 0
         // قائمة الملفات عبر git trees API (recursive)

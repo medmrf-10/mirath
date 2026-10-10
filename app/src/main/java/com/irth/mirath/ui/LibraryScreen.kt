@@ -63,6 +63,17 @@ fun LibraryScreen(p: Pal, onSeries: (String) -> Unit, onRoadmap: (String) -> Uni
         else msg = "لم تُضَف ملفات"
     }
 
+    // مزامنة تلقائية: سحب عند الفتح، ورفع بعد أي تغيير في المحتوى — «يزامن مع الريبو»
+    LaunchedEffect(Unit) {
+        if (Sync.signedIn()) {
+            val n = Sync.pull(ctx)
+            if (n > 0) { Repo.mergeLocal(); rev++ }
+        }
+    }
+    LaunchedEffect(rev) {
+        if (rev > 0 && Sync.signedIn()) Sync.push(ctx)
+    }
+
     val pickTree = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { u ->
         u?.let { scope.launch { busy = true; after(LocalLib.importTree(ctx, it)); busy = false } }
     }
