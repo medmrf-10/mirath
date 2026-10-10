@@ -13,8 +13,8 @@ android {
         applicationId = "com.irth.mirath"
         minSdk = 24
         targetSdk = 35
-        versionCode = 33
-        versionName = "1.32"
+        versionCode = 34
+        versionName = "1.33"
     }
 
     buildTypes {

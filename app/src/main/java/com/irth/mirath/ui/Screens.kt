@@ -108,7 +108,13 @@ fun HomeScreen(p: Pal, onScience: (String) -> Unit, onLesson: (String) -> Unit) 
         }
         item { SectionTitle(p, "العلوم") }
         itemsIndexed(sciences) { i, s ->
-            RowCard(p, i, s.name, onClick = { onScience(s.id) }, leading = { PhIcon(p, s.name.first().toString()) })
+            RowCard(p, i, s.name, onClick = { onScience(s.id) }, leading = {
+                val ph = Haw.photoOf(s.id)
+                if (ph != null) coil.compose.AsyncImage(model = ph, contentDescription = s.name,
+                    modifier = Modifier.size(44.dp).clip(androidx.compose.foundation.shape.CircleShape),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                else PhIcon(p, s.name.first().toString())
+            })
         }
     }
 }
@@ -121,6 +127,11 @@ fun ScienceScreen(p: Pal, scienceId: String, onSeries: (String) -> Unit, onLesso
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         item {
             Column(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Haw.photoOf(scienceId)?.let { ph ->
+                    coil.compose.AsyncImage(model = ph, contentDescription = science?.name,
+                        modifier = Modifier.padding(bottom = 8.dp).size(88.dp).clip(androidx.compose.foundation.shape.CircleShape),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                }
                 Text(science?.name ?: "", style = MaterialTheme.typography.displayLarge, color = p.text)
             }
         }

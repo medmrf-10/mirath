@@ -17,6 +17,7 @@ object Haw {
     private var booted = false
     private val loaded = mutableSetOf<String>()
     var sheikhNames: Map<String, String> = emptyMap()
+    var sheikhPhotos: Map<String, String> = emptyMap()
 
     // slug → نوع الطبقة → (رقم الدرس → اسم الملف) — من فهرس index.json لكل سلسلة
     // (الحشو ليس موحداً: 01.align مقابل 001.sum داخل السلسلة نفسها — الخرائط هي العقد)
@@ -42,6 +43,10 @@ object Haw {
             sheikhNames = arr(sh["sheikhs"]).associate {
                 str(it.jsonObject["slug"]) to str(it.jsonObject["name"], str(it.jsonObject["slug"]))
             }
+            sheikhPhotos = arr(sh["sheikhs"]).mapNotNull {
+                val sl = str(it.jsonObject["slug"]); val ph = str(it.jsonObject["photo"])
+                if (sl.isEmpty() || ph.isEmpty()) null else sl to "$BASE/$ph"
+            }.toMap()
         }
         val sci = mutableListOf<Science>(); val ser = mutableListOf<Series>()
         val seen = mutableSetOf<String>()
@@ -55,6 +60,10 @@ object Haw {
         Repo.sciences = (Repo.sciences ?: emptyList()) + sci
         Repo.series = (Repo.series ?: emptyList()) + ser
     }
+
+    /** رابط صورة الشيخ لقسم H:<sheikh_slug> — null لغير مشايخ هوشات. */
+    fun photoOf(scienceId: String): String? =
+        scienceId.takeIf { it.startsWith("H:") }?.let { sheikhPhotos[it.removePrefix("H:")] }
 
     /** تعبئة كل سلاسل هوشات في الخلفية — بحث/عدّادات/اقتراحات تعمل فوراً بلا فتح كل سلسلة. */
     fun prefetchAll(scope: CoroutineScope) {
