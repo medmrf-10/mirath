@@ -21,6 +21,8 @@ class PlayerService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             "toggle" -> { G.playPause(); return START_STICKY }
+            "back" -> { G.seek((G.pos - 15).coerceAtLeast(0.0)); return START_STICKY }
+            "fwd" -> { G.seek(G.pos + 15); return START_STICKY }
             "stop" -> { G.stopAll(); stopSelf(); return START_NOT_STICKY }
         }
         ensureSession()
@@ -88,15 +90,25 @@ class PlayerService : Service() {
             this, 2, Intent(this, PlayerService::class.java).setAction("stop"),
             PendingIntent.FLAG_IMMUTABLE,
         )
+        val back = PendingIntent.getService(
+            this, 3, Intent(this, PlayerService::class.java).setAction("back"),
+            PendingIntent.FLAG_IMMUTABLE,
+        )
+        val fwd = PendingIntent.getService(
+            this, 4, Intent(this, PlayerService::class.java).setAction("fwd"),
+            PendingIntent.FLAG_IMMUTABLE,
+        )
         return Notification.Builder(this, CH)
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentTitle(G.title.ifEmpty { "ميراث" })
             .setContentText(if (G.playing) "قيد التشغيل" else "متوقف")
             .setContentIntent(open)
+            .addAction(Notification.Action.Builder(null, "‹15", back).build())
             .addAction(Notification.Action.Builder(null, if (G.playing) "إيقاف" else "تشغيل", toggle).build())
+            .addAction(Notification.Action.Builder(null, "15›", fwd).build())
             .addAction(Notification.Action.Builder(null, "إنهاء", stp).build())
             .setOngoing(true)
-            .setStyle(Notification.MediaStyle().setMediaSession(session?.sessionToken))
+            .setStyle(Notification.MediaStyle().setShowActionsInCompactView(0, 1, 2).setMediaSession(session?.sessionToken))
             .build()
     }
 
