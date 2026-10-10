@@ -3,8 +3,15 @@ package com.irth.mirath.store
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.compose.runtime.mutableStateOf
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+
+@Serializable
+data class Bookmark(val s: Int, val n: String = "", val t: Long = 0)
 
 object Prefs {
+    private val json = Json { ignoreUnknownKeys = true }
     private const val FILE = "mirath.prefs"
     private var sp: SharedPreferences? = null
 
@@ -102,6 +109,42 @@ object Prefs {
         sp?.all?.filterKeys { it.startsWith("prg.") }
             ?.mapKeys { it.key.removePrefix("prg.") }
             ?.mapValues { (it.value as? Int) ?: 0 } ?: emptyMap()
+
+    val bmRev = mutableStateOf(0)
+
+    fun bookmarks(id: String): List<Bookmark> =
+        runCatching { json.decodeFromString<List<Bookmark>>(sp?.getString("bm.$id", "[]") ?: "[]") }
+            .getOrDefault(emptyList()).sortedBy { it.s }
+
+    private fun saveBms(id: String, l: List<Bookmark>) {
+        if (l.isEmpty()) sp?.edit()?.remove("bm.$id")?.apply()
+        else sp?.edit()?.putString("bm.$id", json.encodeToString(l.sortedBy { it.s }))?.apply()
+        bmRev.value++
+    }
+
+    /** علامة عند الموضع الحالي؛ true إن أُضيفت، false إن أُزيلت (موجودة ±3 ثوانٍ). */
+    fun toggleBookmark(id: String, sec: Int): Boolean {
+        val l = bookmarks(id)
+        val hit = l.firstOrNull { kotlin.math.abs(it.s - sec) <= 3 }
+        if (hit != null) { saveBms(id, l - hit); return false }
+        saveBms(id, l + Bookmark(sec, t = System.currentTimeMillis()))
+        return true
+    }
+
+    fun removeBookmark(id: String, sec: Int) =
+        saveBms(id, bookmarks(id).filter { it.s != sec })
+
+    fun setBookmarkNote(id: String, sec: Int, note: String) =
+        saveBms(id, bookmarks(id).map { if (it.s == sec) it.copy(n = note.trim()) else it })
+
+    fun hasBookmark(id: String): Boolean = bookmarks(id).isNotEmpty()
+
+    /** كل العلامات عبر الدروس: videoId → قائمتها. */
+    fun allBookmarks(): Map<String, List<Bookmark>> =
+        sp?.all?.filterKeys { it.startsWith("bm.") }
+            ?.mapKeys { it.key.removePrefix("bm.") }
+            ?.mapValues { runCatching { json.decodeFromString<List<Bookmark>>(it.value as String) }.getOrDefault(emptyList()) }
+            ?.filterValues { it.isNotEmpty() } ?: emptyMap()
 
     /** مصدر تشغيل السلسلة: "yt" يوتيوب (افتراضي) أو "local" وسائط منزّلة. */
     fun src(seriesId: String): String = sp?.getString("src.$seriesId", "yt") ?: "yt"

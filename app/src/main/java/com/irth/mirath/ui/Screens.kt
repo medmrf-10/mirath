@@ -264,6 +264,27 @@ fun FavScreen(p: Pal, onLesson: (String) -> Unit) {
                 onClick = { onLesson(v.id) },
             )
         }
+        Prefs.bmRev.value // اشتراك إعادة التركيب للعلامات
+        val bms = Prefs.allBookmarks()
+        if (bms.isNotEmpty()) {
+            item {
+                Column(Modifier.fillMaxWidth().padding(top = 18.dp, bottom = 6.dp)) {
+                    Text("علاماتي", style = MaterialTheme.typography.titleLarge, color = p.text)
+                }
+            }
+            bms.entries.forEach { (vid, bl) ->
+                val bv = Repo.video(vid) ?: return@forEach
+                itemsIndexed(bl.take(5)) { _, b ->
+                    RowCard(
+                        p, b.s, bv.title,
+                        subtitle = if (b.n.isNotEmpty()) b.n else "علامة",
+                        meta = fmtDur(b.s),
+                        leading = { PhIcon(p, "•", done = false) },
+                        onClick = { onLesson(vid) },
+                    )
+                }
+            }
+        }
     }
 }
 

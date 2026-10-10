@@ -71,6 +71,8 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
     var slpI by remember { mutableStateOf(-1) }
     var showDrawer by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
+    var noteFor by remember { mutableStateOf<com.irth.mirath.store.Bookmark?>(null) }
+    var noteTxt by remember { mutableStateOf("") }
     val ctl = G  // مقبض المشغّل العالمي — نفس عقد YtCtl أسمائياً
     val scope = rememberCoroutineScope()
     val ser = remember(videoId) { Repo.series?.firstOrNull { it.items.contains(videoId) } }
@@ -202,6 +204,14 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
                             if (phrases.isNotEmpty()) Text("  جملة ${curPh + 1} / ${phrases.size}", color = p.muted, fontSize = 12.sp)
                             Spacer(Modifier.weight(1f))
                             IconBtn(p, Icons.Filled.Favorite, Prefs.isFav(videoId)) { Prefs.toggleFav(videoId) }
+                            Prefs.bmRev.value // اشتراك إعادة التركيب للعلامات
+                            val hasBm = Prefs.hasBookmark(videoId)
+                            IconBtn(p, if (hasBm) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder, hasBm) {
+                                if (Prefs.toggleBookmark(videoId, pos.toInt())) {
+                                    noteFor = Prefs.bookmarks(videoId).lastOrNull { kotlin.math.abs(it.s - pos.toInt()) <= 3 }
+                                    noteTxt = ""
+                                }
+                            }
                             IconBtn(p, Icons.Filled.Share, false) {
                                 val send = Intent(Intent.ACTION_SEND).apply {
                                     type = "text/plain"
@@ -342,6 +352,31 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
                 Text("${ser.items.indexOf(videoId) + 1} / ${ser.items.size}", color = p.muted, fontSize = 12.sp)
                 IconButton(onClick = { showDrawer = false }) { Icon(Icons.Filled.Close, "إغلاق", tint = p.muted) }
             }
+            val bms = Prefs.bookmarks(videoId)
+            if (bms.isNotEmpty()) {
+                Text("علاماتي في هذا الدرس", color = p.gold, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 160.dp)) {
+                    itemsIndexed(bms) { _, b ->
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .clickable { showDrawer = false; ctl.seek(b.s.toDouble() - 0.05) }
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(fmtT(b.s.toDouble()), color = p.gold, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Spacer(Modifier.width(10.dp))
+                            Text(b.n.ifEmpty { "علامة" }, color = p.text, fontSize = 13.sp, modifier = Modifier.weight(1f), maxLines = 1)
+                            IconButton(onClick = { noteFor = b; noteTxt = b.n }, modifier = Modifier.size(28.dp)) {
+                                Icon(Icons.Filled.Edit, "ملاحظة", tint = p.muted, modifier = Modifier.size(16.dp))
+                            }
+                            IconButton(onClick = { Prefs.removeBookmark(videoId, b.s) }, modifier = Modifier.size(28.dp)) {
+                                Icon(Icons.Filled.Delete, "حذف", tint = p.muted, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                        Divider(color = p.line)
+                    }
+                }
+            }
             LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
                 itemsIndexed(ser.items) { i, vid ->
                     val vv = Repo.video(vid)
@@ -377,6 +412,35 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
             }
             Spacer(Modifier.height(24.dp))
         }
+    }
+
+    // حوار ملاحظة العلامة
+    val nb = noteFor
+    if (nb != null) {
+        AlertDialog(
+            onDismissRequest = { noteFor = null },
+            containerColor = p.card,
+            title = { Text("ملاحظة عند ${fmtT(nb.s.toDouble())}", color = p.text, fontSize = 15.sp) },
+            text = {
+                OutlinedTextField(
+                    value = noteTxt, onValueChange = { noteTxt = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("اكتب ملاحظتك…", color = p.muted) },
+                    textStyle = TextStyle(color = p.text, fontSize = 14.sp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = p.gold, unfocusedBorderColor = p.line, cursorColor = p.gold,
+                    ),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { Prefs.setBookmarkNote(videoId, nb.s, noteTxt); noteFor = null }) {
+                    Text("حفظ", color = p.gold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { noteFor = null }) { Text("إلغاء", color = p.muted) }
+            },
+        )
     }
 }
 
