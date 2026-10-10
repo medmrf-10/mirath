@@ -57,7 +57,10 @@ object LocalLib {
             if (File(ld, "summary.json").exists()) has += "summary"
             if (File(ld, "questions.json").exists()) has += "questions"
             if (mediaFile(sd.name, ld.name) != null) has += "media"
-            Video(id = "L:${sd.name}/${ld.name}", title = title, duration = dur, has = has)
+            val yt = File(ld, "yt.txt").takeIf { it.exists() }?.readText()?.trim()
+                ?: ytOf(File(ld, "link.txt").takeIf { it.exists() }?.readText()?.trim() ?: "")
+            if (yt.isNotEmpty()) has += "yt"
+            Video(id = "L:${sd.name}/${ld.name}", title = title, duration = dur, has = has, yt = yt)
         }
     }
 
@@ -119,13 +122,18 @@ object LocalLib {
         n
     }
 
-    /** استيراد ملفات مفردة إلى مجلد «وارد» تحت سلسلة مستعارة. */
+    /**
+     * استيراد ملفات مفردة بأي نوع — الاسم يُصنّفه تلقائياً:
+     * <مفتاح>.transcript.txt / .align.json / .summary.json / .questions.json / media.mp3|mp4 / yt.txt
+     * أو بأسمائها القياسية. ملفات المفتاح الواحد تندمج في درس واحد تحت «وارد» ولو وصلت على دفعات.
+     */
     suspend fun importFiles(ctx: Context, uris: List<Uri>): Int = withContext(Dispatchers.IO) {
         var n = 0
         uris.forEach { u ->
             val d = DocumentFile.fromSingleUri(ctx, u) ?: return@forEach
             val name = d.name ?: return@forEach
-            val out = File(root, "وارد/$name")
+            val (key, canon) = classify(name)
+            val out = File(root, "وارد/$key/$canon")
             out.parentFile?.mkdirs()
             runCatching {
                 ctx.contentResolver.openInputStream(u)?.use { i -> out.outputStream().use { i.copyTo(it) } }
@@ -133,5 +141,61 @@ object LocalLib {
             }
         }
         n
+    }
+
+    /** تصنيف اسم ملف إلى (مفتاح الدرس, الاسم القياسي). */
+    fun classify(name: String): Pair<String, String> {
+        val low = name.lowercase()
+        val strip = Regex("\\.(transcript|align|summary|questions|media|yt|link)\\.(txt|json|mp3|m4a|wav|ogg|mp4|webm|mkv)$")
+        val m = strip.find(low)
+        return if (m != null) {
+            val key = name.substring(0, m.range.first)
+            val kind = m.groupValues[1]
+            val ext = m.groupValues[2]
+            key to canonName(kind, ext)
+        } else when {
+            low in setOf("transcript.txt","align.json","summary.json","questions.json") -> "درس-وارد" to name.lowercase()
+            low.endsWith(".mp3") || low.endsWith(".m4a") || low.endsWith(".wav") || low.endsWith(".ogg")
+                || low.endsWith(".mp4") || low.endsWith(".webm") || low.endsWith(".mkv") ->
+                name.substringBeforeLast('.') to "media." + low.substringAfterLast('.')
+            else -> name.substringBeforeLast('.') to name
+        }
+    }
+
+    private fun canonName(kind: String, ext: String): String = when (kind) {
+        "transcript" -> "transcript.txt"; "align" -> "align.json"
+        "summary" -> "summary.json"; "questions" -> "questions.json"
+        "media" -> "media.$ext"; "yt", "link" -> "yt.txt"; else -> "$kind.$ext"
+    }
+
+    /** استخراج معرف فيديو يوتيوب من رابط أو نص. */
+    fun ytOf(text: String): String {
+        val m = Regex("(?:youtu\\.be/|v=|shorts/|embed/)([\\w-]{6,15})").find(text) ?: return text.trim()
+        return m.groupValues[1]
+    }
+    fun playlistOf(text: String): String = Regex("list=([\\w-]{6,40})").find(text)?.groupValues?.get(1) ?: ""
+
+    /** إضافة درس من رابط يوتيوب مفرد → «وارد». */
+    suspend fun importVideoLink(text: String): String = withContext(Dispatchers.IO) {
+        val yt = ytOf(text); if (yt.isEmpty()) return@withContext ""
+        val d = File(root, "وارد/$yt"); d.mkdirs()
+        File(d, "yt.txt").writeText(yt)
+        yt
+    }
+
+    /** إضافة سلسلة من رابط قائمة يوتيوب — يجلب صفحة القائمة ويستخرج معرفات الدروس. */
+    suspend fun importPlaylist(text: String): Int = withContext(Dispatchers.IO) {
+        val pl = playlistOf(text); if (pl.isEmpty()) return@withContext 0
+        val sd = File(root, "قائمة-$pl"); sd.mkdirs()
+        File(sd, "series.json").writeText("{\"title\":\"قائمة يوتيوب $pl\",\"science\":\"local\"}")
+        runCatching {
+            val html = java.net.URL("https://www.youtube.com/playlist?list=$pl").readText()
+            val ids = Regex("\"videoId\":\"([\\w-]{11})\"").findAll(html).map { it.groupValues[1] }.toList().distinct()
+            ids.forEachIndexed { i, yt ->
+                val d = File(sd, "%03d".format(i + 1)); d.mkdirs()
+                File(d, "yt.txt").writeText(yt)
+            }
+            ids.size
+        }.getOrDefault(0)
     }
 }

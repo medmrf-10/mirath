@@ -90,6 +90,36 @@ fun LibraryScreen(p: Pal, onSeries: (String) -> Unit) {
                     Spacer(Modifier.width(6.dp)); Text("ملفات مفردة")
                 }
             }
+            var link by remember { mutableStateOf("") }
+            Row(Modifier.fillMaxWidth().padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = link, onValueChange = { link = it },
+                    placeholder = { Text("رابط يوتيوب: فيديو أو قائمة", fontSize = 13.sp) },
+                    modifier = Modifier.weight(1f).height(50.dp),
+                    shape = RoundedCornerShape(14.dp), singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = p.gold, unfocusedBorderColor = p.soft,
+                        focusedTextColor = p.text, unfocusedTextColor = p.text,
+                    ),
+                )
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            busy = true
+                            val n = if (LocalLib.playlistOf(link).isNotEmpty()) LocalLib.importPlaylist(link)
+                                    else if (LocalLib.importVideoLink(link).isNotEmpty()) 1 else 0
+                            link = ""
+                            if (n > 0) after(n) else { msg = "الرابط غير صالح أو لم يُعثر على دروس"; }
+                            busy = false
+                        }
+                    },
+                    modifier = Modifier.height(50.dp), shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = p.gold),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, p.line),
+                    enabled = !busy && link.isNotBlank(),
+                ) { Text("أضف") }
+            }
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 12.dp), color = p.gold, trackColor = p.soft)
             msg?.let {
                 Text(it, color = p.gold, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
