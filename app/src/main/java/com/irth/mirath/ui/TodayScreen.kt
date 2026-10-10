@@ -13,6 +13,7 @@ import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistPlay
 import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.outlined.Quiz
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -141,6 +142,37 @@ fun TodayScreen(p: Pal, onLesson: (String) -> Unit, onBrowse: () -> Unit) {
                     }
                     Spacer(Modifier.height(4.dp))
                     Text("$rd/$ra درساً في المسار", color = p.muted, fontSize = 12.sp)
+                }
+            }
+        }
+
+        // مراجعات اليوم: أسئلة قيّمتها ضعيفة تطفو للمراجعة — «أداة تعلم خارقة»
+        val weak = Prefs.weakQuestions()
+        if (weak.isNotEmpty()) {
+            item {
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(p.card).padding(16.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Outlined.Quiz, null, tint = p.gold, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("مراجعة اليوم — ${weak.values.sumOf { it.size }} سؤالاً ضعيفاً", color = p.gold, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    weak.entries.take(3).forEach { (vid, qs) ->
+                        val vv = Repo.video(vid)
+                        Row(
+                            Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(10.dp))
+                                .background(p.soft).clickable { onLesson(vid) }.padding(horizontal = 10.dp, vertical = 9.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(vv?.title ?: vid, color = p.text, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("${qs.size} سؤالاً — اضغط «اختبر نفسك» داخل الدرس", color = p.muted, fontSize = 11.sp)
+                            }
+                            Icon(Icons.Filled.PlayArrow, null, tint = p.gold, modifier = Modifier.size(20.dp))
+                        }
+                    }
                 }
             }
         }

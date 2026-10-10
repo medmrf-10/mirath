@@ -71,6 +71,12 @@ object Prefs {
         sp?.edit()?.putString("qrate", qrate.value.entries.joinToString(",") { "${it.key}:${it.value}" })?.apply()
     }
 
+    /** مراجعة اليوم: أسئلة قيّمها المستخدم ضعيفة (1-2) مجمعة بالدرس — فيديوId→مؤشرات الأسئلة. */
+    fun weakQuestions(): Map<String, List<Int>> =
+        qrate.value.entries.filter { it.value in 1..2 }
+            .groupBy({ it.key.substringBefore('#') }, { it.key.substringAfter('#').toIntOrNull() ?: -1 })
+            .filterValues { it.isNotEmpty() }
+
     /** تقدّم «قيد المشاهدة» بقاعدة إرث: أكثر من 10 ثوانٍ ولم يبلغ 95%. */
     fun ongoing(id: String, duration: Int): Boolean {
         val pv = progress(id)
