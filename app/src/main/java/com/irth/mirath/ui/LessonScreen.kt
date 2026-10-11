@@ -51,7 +51,7 @@ private fun fmtT(sec: Double): String {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
+fun LessonScreen(p: Pal, videoId: String, at: Int = -1, onLesson: (String) -> Unit = {}) {
     val v = Repo.video(videoId)
     if (v == null) { EmptyBox(p, "الدرس غير موجود"); return }
     val ctx = LocalContext.current
@@ -64,7 +64,7 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
     var transcript by remember { mutableStateOf<String?>(null) }
     var summary by remember { mutableStateOf<Summary?>(null) }
     var questions by remember { mutableStateOf<List<QA>?>(null) }
-    var pos by remember { mutableStateOf(Prefs.progress(videoId).toDouble()) }
+    var pos by remember { mutableStateOf(if (at >= 0) at.toDouble() else Prefs.progress(videoId).toDouble()) }
     var dur by remember { mutableStateOf(v.duration.toDouble()) }
     val playing = G.playing
     var curPh by remember { mutableStateOf(0) }
@@ -87,7 +87,8 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
     }
     LaunchedEffect(videoId) {
         Prefs.markOpened(videoId)
-        G.play(ctx, videoId, v.title, v.yt, media, Prefs.progress(videoId).toInt()) {
+        val same = G.videoId == videoId
+        G.play(ctx, videoId, v.title, v.yt, media, if (at >= 0) at else Prefs.progress(videoId).toInt()) {
             Prefs.setProgress(videoId, 0)
             if (ser != null) {
                 val idx = ser.items.indexOf(videoId)
@@ -97,6 +98,8 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
                 if (next != null) onLesson(next)
             }
         }
+        // قادم من نتيجة بحث موقوتة والدرس نفسه يعمل — اقفز للموضع
+        if (same && at >= 0) ctl.seek(at.toDouble())
         if (v.has.contains("align")) {
             runCatching {
                 val ws = Repo.align(videoId)

@@ -529,8 +529,15 @@ private fun StatRow(p: Pal, k: String, v: String, frac: Float = -1f) {
 }
 
 @Composable
-fun SearchSheet(p: Pal, onLesson: (String) -> Unit, onSeries: (String) -> Unit, onScience: (String) -> Unit) {
+fun SearchSheet(
+    p: Pal,
+    onLesson: (String) -> Unit,
+    onSeries: (String) -> Unit,
+    onScience: (String) -> Unit,
+    onHit: (String, Int) -> Unit = { id, _ -> onLesson(id) },
+) {
     var q by remember { mutableStateOf("") }
+    var inText by remember { mutableStateOf(Prefs.str("search.scope") == "text") }
     val t = q.trim()
     val vids = remember(t) { Repo.search(t).take(30) }
     val sers = remember(t) { if (t.isEmpty()) emptyList() else Repo.series?.filter { it.title.contains(t) }?.take(10) ?: emptyList() }
@@ -539,7 +546,7 @@ fun SearchSheet(p: Pal, onLesson: (String) -> Unit, onSeries: (String) -> Unit, 
         OutlinedTextField(
             value = q, onValueChange = { q = it },
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("ابحث: درساً أو سلسلة أو علماً…", color = p.muted) },
+            placeholder = { Text(if (inText) "عبارة سمعتها في درس…" else "ابحث: درساً أو سلسلة أو علماً…", color = p.muted) },
             leadingIcon = { Icon(Icons.Filled.Search, null, tint = p.muted) },
             trailingIcon = {
                 if (q.isNotEmpty()) IconButton(onClick = { q = "" }) { Icon(Icons.Filled.Close, null, tint = p.muted) }
@@ -551,13 +558,46 @@ fun SearchSheet(p: Pal, onLesson: (String) -> Unit, onSeries: (String) -> Unit, 
                 cursorColor = p.gold, focusedTextColor = p.text, unfocusedTextColor = p.text,
             ),
         )
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(8.dp))
+        // نطاق البحث: العناوين | داخل نصوص الدروس
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(999.dp)).background(p.bg).border(1.dp, p.line, RoundedCornerShape(999.dp)).padding(3.dp),
+        ) {
+            listOf(false to "العناوين", true to "داخل الدروس").forEach { (txt, label) ->
+                val on = inText == txt
+                Box(
+                    Modifier.weight(1f).height(40.dp).clip(RoundedCornerShape(999.dp))
+                        .background(if (on) p.soft else androidx.compose.ui.graphics.Color.Transparent)
+                        .clickable { inText = txt; Prefs.putStr("search.scope", if (txt) "text" else "") },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(label, color = if (on) p.primary else p.muted, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, fontSize = 14.sp)
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        if (inText) {
+            TextSearchPane(p, q, onQuery = { q = it }, onHit = onHit)
+            return@Column
+        }
         LazyColumn(Modifier.heightIn(max = 420.dp)) {
+            if (t.length >= 2) item {
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { inText = true; Prefs.putStr("search.scope", "text") }
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.Search, null, tint = p.gold, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("ابحث عن «$t» داخل نصوص الدروس", color = p.gold, fontSize = 13.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("←", color = p.gold)
+                }
+            }
             if (t.isNotEmpty() && vids.isEmpty() && sers.isEmpty() && scis.isEmpty()) {
                 item {
-                    Column(Modifier.fillMaxWidth().padding(36.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(Icons.Filled.SearchOff, null, tint = p.muted, modifier = Modifier.size(34.dp))
-                        Text("لا نتائج لـ«$t»", color = p.muted, modifier = Modifier.padding(top = 8.dp))
+                        Text("لا عناوين تطابق «$t»", color = p.muted, modifier = Modifier.padding(top = 8.dp))
                     }
                 }
             }

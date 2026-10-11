@@ -62,25 +62,35 @@ object Repo {
 
     suspend fun lesson(id: String): LessonData = lessonCache.getOrPut(id) { LessonData() }
 
+    /** جلب المحاذاة بلا تخزين في الذاكرة — للفهرسة الجماعية. */
+    suspend fun loadAlign(id: String, cache: Boolean = true): List<AWord> {
+        LocalLib.alignEl(id)?.let { el -> runCatching { parseAlign(el) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { return it } }
+        if (id.startsWith("H:")) runCatching { Haw.align(id, cache) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { return it }
+        if (id.startsWith("H:") || id.startsWith("L:")) return emptyList()
+        return runCatching { parseAlign(Api.getJson("/content/tube/$id/align.json", cache)) }.getOrDefault(emptyList())
+    }
+
+    suspend fun loadTranscript(id: String, cache: Boolean = true): String =
+        LocalLib.transcript(id)
+            ?: (if (id.startsWith("H:")) runCatching { Haw.transcript(id, cache) }.getOrDefault("")
+            else if (id.startsWith("L:")) ""
+            else runCatching { Api.getText("/content/tube/$id/transcript.txt", cache) }.getOrDefault(""))
+
     suspend fun align(id: String): List<AWord> {
         val l = lesson(id)
         if (l.align == null) {
-            LocalLib.alignEl(id)?.let { runCatching { l.align = parseAlign(it) } }
-            if (l.align == null && id.startsWith("H:")) {
-                runCatching { l.align = Haw.align(id) }
-            }
-            if (l.align == null) {
-                runCatching { l.align = parseAlign(Api.getJson("/content/tube/$id/align.json")) }
-            }
-            if (l.align == null) l.align = emptyList()
+            l.align = loadAlign(id)
+            if (l.align!!.isNotEmpty()) TextIndex.putAlign(id, l.align!!)
         }
         return l.align!!
     }
 
     suspend fun transcript(id: String): String {
         val l = lesson(id)
-        if (l.transcript == null) l.transcript = LocalLib.transcript(id)
-            ?: (if (id.startsWith("H:")) runCatching { Haw.transcript(id) }.getOrDefault("") else runCatching { Api.getText("/content/tube/$id/transcript.txt") }.getOrDefault(""))
+        if (l.transcript == null) {
+            l.transcript = loadTranscript(id)
+            if (l.transcript!!.isNotBlank()) TextIndex.putText(id, l.transcript!!, video(id)?.duration ?: 0)
+        }
         return l.transcript!!
     }
 

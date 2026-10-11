@@ -67,6 +67,16 @@ data class AWord(val w: String, val s: Double, val e: Double)
 
 fun parseAlign(el: JsonElement): List<AWord> {
     val obj = el as? kotlinx.serialization.json.JsonObject ?: return emptyList()
+    // صيغة w: [[كلمة, بداية, نهاية, رقم المقطع]…] بأوقات مطلقة بالثواني (≈40% من محاذاة إرث + هوشات)
+    (obj["w"] as? kotlinx.serialization.json.JsonArray)?.let { arr ->
+        return arr.mapNotNull { x ->
+            val a = x as? kotlinx.serialization.json.JsonArray ?: return@mapNotNull null
+            val w = (a.getOrNull(0) as? kotlinx.serialization.json.JsonPrimitive)?.content ?: return@mapNotNull null
+            val s = (a.getOrNull(1) as? kotlinx.serialization.json.JsonPrimitive)?.doubleOrNull ?: return@mapNotNull null
+            val e = (a.getOrNull(2) as? kotlinx.serialization.json.JsonPrimitive)?.doubleOrNull ?: s
+            AWord(w, s, e)
+        }
+    }
     val words = (obj["words"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.split(' ')?.filter { it.isNotBlank() } ?: return emptyList()
     fun numArr(k: String) = (obj[k] as? kotlinx.serialization.json.JsonArray)?.map { (it as? kotlinx.serialization.json.JsonPrimitive)?.doubleOrNull ?: 0.0 } ?: emptyList()
     val st = numArr("start"); val du = numArr("dur")

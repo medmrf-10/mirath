@@ -60,7 +60,7 @@ import kotlinx.serialization.Serializable
 @Serializable object Lib
 @Serializable data class ScienceR(val id: String)
 @Serializable data class SeriesR(val id: String)
-@Serializable data class LessonR(val id: String)
+@Serializable data class LessonR(val id: String, val at: Int = -1)
 @Serializable data class RoadmapR(val id: String)
 @Serializable data class ExamR(val seriesId: String)
 
@@ -70,6 +70,7 @@ class MainActivity : ComponentActivity() {
         Prefs.init(applicationContext)
         Api.init(applicationContext)
         LocalLib.init(applicationContext)
+        com.irth.mirath.data.TextIndex.init(applicationContext)
         enableEdgeToEdge()
         setContent { MirathApp() }
     }
@@ -231,7 +232,7 @@ fun MirathApp() {
                         }
                         composable<LessonR> { e ->
                             val r = e.toRoute<LessonR>()
-                            LessonScreen(p, r.id, onLesson = { nav.navigate(LessonR(it)) { launchSingleTop = true } })
+                            LessonScreen(p, r.id, r.at, onLesson = { nav.navigate(LessonR(it)) { launchSingleTop = true } })
                         }
                         composable<RoadmapR> { e ->
                             val r = e.toRoute<RoadmapR>()
@@ -251,6 +252,7 @@ fun MirathApp() {
                     SearchSheet(
                         p,
                         onLesson = { id -> showSearch = false; nav.navigate(LessonR(id)) },
+                        onHit = { id, sec -> showSearch = false; nav.navigate(LessonR(id, sec)) },
                         onSeries = { id -> showSearch = false; nav.navigate(SeriesR(id)) },
                         onScience = { id -> showSearch = false; nav.navigate(ScienceR(id)) },
                     )
