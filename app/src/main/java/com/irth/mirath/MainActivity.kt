@@ -243,7 +243,7 @@ fun MirathApp() {
                             LessonScreen(
                                 p, r.id,
                                 onLesson = { nav.navigate(LessonR(it)) { launchSingleTop = true } },
-                                onFollow = { nav.navigate(LessonR(it)) { popUpTo<LessonR> { inclusive = true }; launchSingleTop = true } },
+                                onFollow = { if (nav.currentBackStackEntry == e) nav.navigate(LessonR(it)) { popUpTo<LessonR> { inclusive = true }; launchSingleTop = true } },
                             )
                         }
                         composable<RoadmapR> { e ->
