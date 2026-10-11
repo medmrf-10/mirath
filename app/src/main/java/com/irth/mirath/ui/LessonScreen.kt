@@ -42,7 +42,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private val SPEEDS = listOf(1.0, 1.25, 1.5, 2.0, 0.75)
-private val SLEEPS = listOf(10, 20, 30)
 
 private fun fmtT(sec: Double): String {
     val s = sec.toInt()
@@ -51,7 +50,7 @@ private fun fmtT(sec: Double): String {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
+fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}, onFollow: (String) -> Unit = onLesson) {
     val v = Repo.video(videoId)
     if (v == null) { EmptyBox(p, "الدرس غير موجود"); return }
     val ctx = LocalContext.current
@@ -68,8 +67,8 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
     var dur by remember { mutableStateOf(v.duration.toDouble()) }
     val playing = G.playing
     var curPh by remember { mutableStateOf(0) }
-    var spdI by remember { mutableStateOf(0) }
-    var slpI by remember { mutableStateOf(-1) }
+    var spdI by remember { mutableStateOf(SPEEDS.indexOf(Prefs.speed().toDouble()).coerceAtLeast(0)) }
+    var claimed by remember(videoId) { mutableStateOf(false) }
     var showDrawer by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     var noteFor by remember { mutableStateOf<com.irth.mirath.store.Bookmark?>(null) }
@@ -87,16 +86,11 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
     }
     LaunchedEffect(videoId) {
         Prefs.markOpened(videoId)
-        G.play(ctx, videoId, v.title, v.yt, media, Prefs.progress(videoId).toInt()) {
-            Prefs.setProgress(videoId, 0)
-            if (ser != null) {
-                val idx = ser.items.indexOf(videoId)
-                val next = ser.items.drop(idx + 1).firstOrNull { nid ->
-                    Repo.video(nid)?.let { !Prefs.finished(nid, it.duration) } == true
-                }
-                if (next != null) onLesson(next)
-            }
+        // المحرك العالمي يحلّ المصدر والاستئناف ويتولى الانتقال للتالي وحده (حتى والشاشة مقفلة)
+        if (G.videoId != videoId) {
+            if (!G.playLesson(ctx, videoId)) G.play(ctx, videoId, v.title, v.yt, media, Prefs.progress(videoId)) {}
         }
+        claimed = true
         if (v.has.contains("align")) {
             runCatching {
                 val ws = Repo.align(videoId)
@@ -110,13 +104,14 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
     LaunchedEffect(videoId) {
         while (true) { delay(5000); if (pos > 0) Prefs.setProgress(videoId, pos.toInt()) }
     }
-    // مؤقت النوم
-    LaunchedEffect(slpI) {
-        if (slpI in SLEEPS.indices) {
-            delay(SLEEPS[slpI] * 60_000L)
-            ctl.pause(); slpI = -1
-        }
+    // الشاشة تتبع المحرك: إن انتقل للتالي (نهاية/إشعار/سماعة) تنتقل معه بدل أن يتبعها هو
+    LaunchedEffect(G.videoId, claimed) {
+        val g = G.videoId
+        if (claimed && g != null && g != videoId) onFollow(g)
     }
+    // نبض دقيقة لعدّاد مؤقت النوم
+    var sleepTick by remember { mutableStateOf(0) }
+    LaunchedEffect(G.sleepAt) { while (G.sleepAt > 0) { delay(20_000); sleepTick++ } }
 
     Column(Modifier.fillMaxSize()) {
         // شريط الأوضاع — أيقوني مثل lmodes
@@ -241,9 +236,9 @@ fun LessonScreen(p: Pal, videoId: String, onLesson: (String) -> Unit = {}) {
                             ChipBtn(p, "×${SPEEDS[spdI].let { if (it % 1.0 == 0.0) it.toInt().toString() else it.toString() }}", spdI != 0) {
                                 spdI = (spdI + 1) % SPEEDS.size; ctl.setRate(SPEEDS[spdI])
                             }
-                            ChipBtn(p, if (slpI >= 0) "نوم ${SLEEPS[slpI]}" else "نوم", slpI >= 0) {
-                                slpI = (slpI + 1) % (SLEEPS.size + 1)
-                            }
+                            sleepTick
+                            val sl = G.sleepLabel()
+                            ChipBtn(p, sl ?: "نوم", sl != null) { G.cycleSleep() }
                         }
                         Box(
                             Modifier.fillMaxWidth().padding(top = 10.dp).height(3.dp)

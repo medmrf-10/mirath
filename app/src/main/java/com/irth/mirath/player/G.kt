@@ -27,6 +27,15 @@ object G {
     var dur by mutableStateOf(0.0)
     var local by mutableStateOf(false)
     var speed by mutableStateOf(1.0)
+    /** سياق الطابور: السلسلة والشيخ والتالي/السابق — يقرؤها الإشعار والمشغّل المصغّر. */
+    var seriesTitle by mutableStateOf("")
+    var artist by mutableStateOf("")
+    var scienceId by mutableStateOf("")
+    var nextId by mutableStateOf<String?>(null)
+    var prevId by mutableStateOf<String?>(null)
+    /** مؤقت النوم العالمي: لحظة الانتهاء (ms) أو 0، أو «نهاية الدرس». يعيش خارج أي شاشة. */
+    var sleepAt by mutableStateOf(0L)
+    var sleepEnd by mutableStateOf(false)
 
     var webView: WebView? = null
         private set
@@ -45,7 +54,7 @@ var pl;window.ct=0;window.ps=-1;
 function onYouTubeIframeAPIReady(){pl=new YT.Player('p',{playerVars:{rel:0,playsinline:1,enablejsapi:1},
 events:{onReady:function(){if(window.__pend){loadVid(window.__pend.id,window.__pend.st);window.__pend=null}},
 onStateChange:function(e){window.ps=e.data;}}});}
-window.loadVid=function(id,st){try{pl.loadVideoById({videoId:id,startSeconds:st})}catch(e){}};
+window.loadVid=function(id,st){window.ct=st;window.ps=-1;try{pl.loadVideoById({videoId:id,startSeconds:st})}catch(e){}};
 setInterval(function(){try{if(pl&&pl.getCurrentTime)window.ct=pl.getCurrentTime()}catch(e){}},200);
 </script><script src="https://www.youtube.com/iframe_api"></script></body></html>"""
 
@@ -69,6 +78,7 @@ setInterval(function(){try{if(pl&&pl.getCurrentTime)window.ct=pl.getCurrentTime(
         else webView?.evaluateJavascript("try{pl&&pl.playVideo()}catch(e){}", null)
     }
     fun pause() {
+        saveProgress()
         if (local) runCatching { mp?.pause() }
         else webView?.evaluateJavascript("try{pl&&pl.pauseVideo()}catch(e){}", null)
     }
@@ -78,6 +88,7 @@ setInterval(function(){try{if(pl&&pl.getCurrentTime)window.ct=pl.getCurrentTime(
     }
     fun setRate(v: Double) {
         speed = v
+        runCatching { com.irth.mirath.store.Prefs.setSpeed(v.toFloat()) }
         if (local) runCatching { mp?.playbackParams = mp?.playbackParams?.setSpeed(v.toFloat())!! }
         else webView?.evaluateJavascript("try{pl&&pl.setPlaybackRate($v)}catch(e){}", null)
     }
@@ -86,6 +97,8 @@ setInterval(function(){try{if(pl&&pl.getCurrentTime)window.ct=pl.getCurrentTime(
         webView?.evaluateJavascript("try{pl&&pl.pauseVideo()}catch(e){}", null)
     }
     fun stopAll() {
+        saveProgress()
+        sleepAt = 0L; sleepEnd = false
         runCatching { mp?.stop(); mp?.release() }
         mp = null
         webView?.evaluateJavascript("try{pl&&pl.stopVideo()}catch(e){}", null)
@@ -99,8 +112,12 @@ setInterval(function(){try{if(pl&&pl.getCurrentTime)window.ct=pl.getCurrentTime(
         if (videoId == id) { // نفس الدرس — أعد ربط المستمعين فقط
             onEnded = ended; return
         }
+        saveProgress()
         endedFired = false
         videoId = id; title = name; onEnded = ended
+        speed = runCatching { com.irth.mirath.store.Prefs.speed().toDouble() }.getOrDefault(speed)
+        resolveContext(id)
+        lastRefresh = 0L; ytLive = false
         dur = 0.0; pos = startSec.toDouble()
         val svc = Intent(ctx, PlayerService::class.java)
         if (media != null) {
@@ -115,7 +132,7 @@ setInterval(function(){try{if(pl&&pl.getCurrentTime)window.ct=pl.getCurrentTime(
                         if (startSec > 0) seekTo(startSec * 1000)
                         start(); playing = true
                     }
-                    setOnCompletionListener { playing = false; ended() }
+                    setOnCompletionListener { playing = false; finishLesson() }
                     setOnErrorListener { _, _, _ -> playing = false; true }
                     prepareAsync()
                 }
@@ -128,7 +145,7 @@ setInterval(function(){try{if(pl&&pl.getCurrentTime)window.ct=pl.getCurrentTime(
             webView?.evaluateJavascript("try{pl&&pl.loadVideoById?loadVid('$ytId',$startSec):(window.__pend={id:'$ytId',st:$startSec})}catch(e){window.__pend={id:'$ytId',st:$startSec}}", null)
         }
         if (speed != 1.0) { val r = speed; handler.postDelayed({ setRate(r) }, 900) }
-        ctx.startForegroundService(svc)
+        runCatching { ctx.startForegroundService(svc) }
         grabFocus()
         tick()
     }
@@ -166,16 +183,118 @@ setInterval(function(){try{if(pl&&pl.getCurrentTime)window.ct=pl.getCurrentTime(
                     webView?.evaluateJavascript("window.ps") { v ->
                         val st = v?.trim()?.toIntOrNull() ?: -1
                         playing = st == 1
-                        if (st == 0 && !endedFired) { endedFired = true; onEnded() }
+                        ytLive = st == 1 || st == 2
+                        if (st == 0 && !endedFired) { endedFired = true; finishLesson() }
                         if (st == 1) endedFired = false
                     }
                     webView?.evaluateJavascript("try{pl?pl.getDuration():0}catch(e){0}") { v ->
                         v?.removeSurrounding("\"")?.toDoubleOrNull()?.let { if (it > 0) dur = it }
                     }
                 }
-                PlayerService.refresh(ctxRef)
+                heartbeat()
                 if (videoId != null) handler.postDelayed(this, 300) else ticking = false
             }
         })
+    }
+
+    // ———————————— محرك الطابور: يعمل بلا أي شاشة ————————————
+
+    private var ytLive = false
+    private var lastRefresh = 0L
+    private var lastSave = 0L
+    private var lastPlaying = false
+
+    /** يشغّل درساً بمعرّفه فقط: يحلّ المصدر (محلي/يوتيوب) وموضع الاستئناف من المخزن — مدخل الإشعار والطابور والشاشات. */
+    fun playLesson(ctx: Context, id: String): Boolean {
+        val v = com.irth.mirath.data.Repo.video(id) ?: return false
+        val ser = com.irth.mirath.data.Repo.seriesOfVideo(id)
+        val media = com.irth.mirath.data.LocalLib.mediaFor(id)
+            ?.takeIf { v.yt.isEmpty() || com.irth.mirath.store.Prefs.src(ser?.id ?: "") == "local" }
+        if (media == null && v.yt.isEmpty()) return false
+        val P = com.irth.mirath.store.Prefs
+        val start = if (P.finished(id, v.duration)) 0 else P.progress(id)
+        play(ctx, id, v.title, v.yt, media, start) {}
+        return true
+    }
+
+    private fun resolveContext(id: String) {
+        val R = com.irth.mirath.data.Repo
+        val v = R.video(id)
+        val ser = R.seriesOfVideo(id)
+        seriesTitle = ser?.title ?: ""
+        scienceId = ser?.science ?: ""
+        artist = v?.speakers?.joinToString("، ") { R.personName(it) }?.ifEmpty { null }
+            ?: R.sciences?.firstOrNull { it.id == ser?.science }?.name ?: "ميراث"
+        val items = ser?.items ?: emptyList()
+        val i = items.indexOf(id)
+        prevId = if (i > 0) items[i - 1] else null
+        nextId = if (i >= 0) items.drop(i + 1).firstOrNull { nid ->
+            R.video(nid)?.let { !com.irth.mirath.store.Prefs.finished(nid, it.duration) } == true
+        } ?: items.getOrNull(i + 1) else null
+    }
+
+    /** نهاية طبيعية: احفظ «مكتمل»، احترم مؤقت «نهاية الدرس»، وإلا انتقل وحدك للتالي غير المكتمل. */
+    private fun finishLesson() {
+        val id = videoId ?: return
+        val full = (com.irth.mirath.data.Repo.video(id)?.duration ?: 0).coerceAtLeast(dur.toInt())
+        runCatching { com.irth.mirath.store.Prefs.setProgress(id, full) }
+        lastSave = System.currentTimeMillis()
+        onEnded()
+        if (sleepEnd) { sleepEnd = false; playing = false; pauseAll(); heartbeat(force = true); return }
+        val ctx = ctxRef ?: return
+        val nx = nextId
+        if (nx == null || !playLesson(ctx, nx)) { playing = false; heartbeat(force = true) }
+    }
+
+    fun skipNext(): Boolean {
+        val ctx = ctxRef ?: return false
+        val nx = nextId ?: return false
+        return playLesson(ctx, nx)
+    }
+
+    /** السابق كأنضج المشغّلات: بعد ٥ ثوانٍ يعيد الدرس من أوله، قبلها يرجع للدرس السابق. */
+    fun skipPrev(): Boolean {
+        val ctx = ctxRef ?: return false
+        if (pos > 5 || prevId == null) { seek(0.0); return true }
+        return playLesson(ctx, prevId!!)
+    }
+
+    /** دورة مؤقت النوم: إيقاف ← 10 ← 20 ← 30 ← 45 ← نهاية الدرس ← إيقاف. */
+    fun cycleSleep() {
+        val now = System.currentTimeMillis()
+        val left = if (sleepAt > 0) ((sleepAt - now) / 60000.0) else -1.0
+        val steps = listOf(10, 20, 30, 45)
+        when {
+            sleepEnd -> { sleepEnd = false; sleepAt = 0L }
+            sleepAt == 0L -> sleepAt = now + steps[0] * 60_000L
+            else -> {
+                val nx = steps.firstOrNull { it > left + 0.5 }
+                if (nx != null) sleepAt = now + nx * 60_000L else { sleepAt = 0L; sleepEnd = true }
+            }
+        }
+    }
+
+    /** نص مختصر لحالة المؤقت للشاشات: «نوم 9د» أو «حتى نهايته». */
+    fun sleepLabel(): String? = when {
+        sleepEnd -> "نوم: آخر الدرس"
+        sleepAt > 0 -> "نوم " + (((sleepAt - System.currentTimeMillis()) / 60000) + 1).coerceAtLeast(1) + "د"
+        else -> null
+    }
+
+    fun saveProgress() {
+        val id = videoId ?: return
+        if (pos > 1 && (local || ytLive)) runCatching { com.irth.mirath.store.Prefs.setProgress(id, pos.toInt()) }
+        lastSave = System.currentTimeMillis()
+    }
+
+    /** نبض الحلقة: حفظ التقدّم كل ٥ث، مؤقت النوم، وإنعاش الإشعار فقط عند تغيّر الحالة أو كل ٥ث (لا ٣ مرات/ث). */
+    private fun heartbeat(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (playing && now - lastSave > 5000) saveProgress()
+        if (sleepAt in 1..now) { sleepAt = 0L; pauseAll(); playing = false; saveProgress() }
+        if (force || playing != lastPlaying || now - lastRefresh > 5000) {
+            lastPlaying = playing; lastRefresh = now
+            PlayerService.refresh(ctxRef)
+        }
     }
 }

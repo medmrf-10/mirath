@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.width
@@ -145,7 +146,7 @@ fun MirathApp() {
                             }
                         }
                         // mini-player — شريط المشغّل العالمي يتبعك في كل الشاشات
-                        if (G.videoId != null && !route.contains("LessonR") || route.contains("RoadmapR")) {
+                        if (G.videoId != null && !route.contains("LessonR")) {
                             Column(
                                 Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
                                     .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
@@ -162,7 +163,15 @@ fun MirathApp() {
                                     Spacer(Modifier.width(10.dp))
                                     Column(Modifier.weight(1f)) {
                                         Text(G.title, color = p.text, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
-                                        if (G.dur > 0) Text(fmtT(G.pos) + " / " + fmtT(G.dur), color = p.muted, style = MaterialTheme.typography.labelSmall)
+                                        val sub = listOfNotNull(
+                                            if (G.dur > 0) fmtT(G.pos) + " / " + fmtT(G.dur) else null,
+                                            G.seriesTitle.ifEmpty { null },
+                                            G.sleepLabel(),
+                                        ).joinToString(" · ")
+                                        if (sub.isNotEmpty()) Text(sub, color = p.muted, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                                    }
+                                    if (G.nextId != null) IconButton(onClick = { G.skipNext() }) {
+                                        Icon(Icons.Filled.SkipPrevious, "الدرس التالي", tint = p.text, modifier = Modifier.size(24.dp))
                                     }
                                     IconButton(onClick = { G.stopAll() }) {
                                         Icon(Icons.Filled.Close, "إيقاف", tint = p.muted, modifier = Modifier.size(18.dp))
@@ -231,7 +240,11 @@ fun MirathApp() {
                         }
                         composable<LessonR> { e ->
                             val r = e.toRoute<LessonR>()
-                            LessonScreen(p, r.id, onLesson = { nav.navigate(LessonR(it)) { launchSingleTop = true } })
+                            LessonScreen(
+                                p, r.id,
+                                onLesson = { nav.navigate(LessonR(it)) { launchSingleTop = true } },
+                                onFollow = { nav.navigate(LessonR(it)) { popUpTo<LessonR> { inclusive = true }; launchSingleTop = true } },
+                            )
                         }
                         composable<RoadmapR> { e ->
                             val r = e.toRoute<RoadmapR>()
