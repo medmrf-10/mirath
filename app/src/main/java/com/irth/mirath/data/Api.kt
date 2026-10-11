@@ -32,14 +32,14 @@ object Api {
         cacheDir?.let { File(it, path.hashCode().toString(16) + ".cache") }
 
     /** جلب نص مع كاش قرصي: عند فشل الشبكة يُقدَّم آخر نسخة ناجحة. */
-    suspend fun get(path: String): String = withContext(Dispatchers.IO) {
+    suspend fun get(path: String, cache: Boolean = true): String = withContext(Dispatchers.IO) {
         val cf = cacheFile(path)
         try {
             val req = Request.Builder().url("$BASE$path").build()
             client.newCall(req).execute().use { r ->
                 if (!r.isSuccessful) error("HTTP ${r.code} on $path")
                 val body = r.body?.string() ?: ""
-                runCatching { cf?.writeText(body) }
+                if (cache) runCatching { cf?.writeText(body) }
                 body
             }
         } catch (e: Exception) {
@@ -49,14 +49,14 @@ object Api {
     }
 
     /** جلب من رابط مطلق (مصادر خارج BASE مثل hawshat raw) بنفس الكاش. */
-    suspend fun getAbs(url: String): String = withContext(Dispatchers.IO) {
+    suspend fun getAbs(url: String, cache: Boolean = true): String = withContext(Dispatchers.IO) {
         val cf = cacheFile(url)
         try {
             val req = Request.Builder().url(url).build()
             client.newCall(req).execute().use { r ->
                 if (!r.isSuccessful) error("HTTP ${r.code} on $url")
                 val body = r.body?.string() ?: ""
-                runCatching { cf?.writeText(body) }
+                if (cache) runCatching { cf?.writeText(body) }
                 body
             }
         } catch (e: Exception) {
@@ -65,8 +65,8 @@ object Api {
         }
     }
 
-    suspend fun getJson(path: String): JsonElement = json.parseToJsonElement(get(path)).jsonObject
-    suspend fun getText(path: String): String = get(path)
+    suspend fun getJson(path: String, cache: Boolean = true): JsonElement = json.parseToJsonElement(get(path, cache)).jsonObject
+    suspend fun getText(path: String, cache: Boolean = true): String = get(path, cache)
 
     inline fun <reified T> decode(el: JsonElement): T = json.decodeFromJsonElement(el)
 }

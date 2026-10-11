@@ -70,6 +70,7 @@ class MainActivity : ComponentActivity() {
         Prefs.init(applicationContext)
         Api.init(applicationContext)
         LocalLib.init(applicationContext)
+        com.irth.mirath.data.Fts.init(applicationContext)
         enableEdgeToEdge()
         setContent { MirathApp() }
     }
@@ -207,7 +208,7 @@ fun MirathApp() {
                         popExitTransition = { androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(160)) },
                     ) {
                         composable<Today> {
-                            TodayScreen(p, onLesson = { nav.navigate(LessonR(it)) }) {
+                            TodayScreen(p, onLesson = { nav.navigate(LessonR(it)) }, onSearch = { showSearch = true }) {
                                 nav.navigate(Home) { popUpTo(Today) }
                             }
                         }
@@ -253,6 +254,12 @@ fun MirathApp() {
                         onLesson = { id -> showSearch = false; nav.navigate(LessonR(id)) },
                         onSeries = { id -> showSearch = false; nav.navigate(SeriesR(id)) },
                         onScience = { id -> showSearch = false; nav.navigate(ScienceR(id)) },
+                        onTimed = { id, sec ->
+                            showSearch = false
+                            Prefs.setProgress(id, sec)
+                            if (G.videoId == id) G.seek(sec.toDouble())
+                            nav.navigate(LessonR(id)) { launchSingleTop = true }
+                        },
                     )
                 }
             }

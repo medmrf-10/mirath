@@ -529,17 +529,26 @@ private fun StatRow(p: Pal, k: String, v: String, frac: Float = -1f) {
 }
 
 @Composable
-fun SearchSheet(p: Pal, onLesson: (String) -> Unit, onSeries: (String) -> Unit, onScience: (String) -> Unit) {
+fun SearchSheet(p: Pal, onLesson: (String) -> Unit, onSeries: (String) -> Unit, onScience: (String) -> Unit, onTimed: (String, Int) -> Unit = { id, _ -> onLesson(id) }) {
     var q by remember { mutableStateOf("") }
     val t = q.trim()
     val vids = remember(t) { Repo.search(t).take(30) }
+    var groups by remember { mutableStateOf<List<com.irth.mirath.data.Fts.Group>>(emptyList()) }
+    var ftsBusy by remember { mutableStateOf(false) }
+    LaunchedEffect(t, com.irth.mirath.data.Fts.count.value / 25) {
+        if (t.length < 2) { groups = emptyList(); return@LaunchedEffect }
+        kotlinx.coroutines.delay(260)
+        ftsBusy = true
+        groups = runCatching { com.irth.mirath.data.Fts.search(t) }.getOrDefault(emptyList())
+        ftsBusy = false
+    }
     val sers = remember(t) { if (t.isEmpty()) emptyList() else Repo.series?.filter { it.title.contains(t) }?.take(10) ?: emptyList() }
     val scis = remember(t) { if (t.isEmpty()) emptyList() else Repo.sciences?.filter { it.name.contains(t) } ?: emptyList() }
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
         OutlinedTextField(
             value = q, onValueChange = { q = it },
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("ابحث: درساً أو سلسلة أو علماً…", color = p.muted) },
+            placeholder = { Text("ابحث: درساً أو سلسلة أو كلمة قالها الشيخ…", color = p.muted) },
             leadingIcon = { Icon(Icons.Filled.Search, null, tint = p.muted) },
             trailingIcon = {
                 if (q.isNotEmpty()) IconButton(onClick = { q = "" }) { Icon(Icons.Filled.Close, null, tint = p.muted) }
@@ -551,9 +560,12 @@ fun SearchSheet(p: Pal, onLesson: (String) -> Unit, onSeries: (String) -> Unit, 
                 cursorColor = p.gold, focusedTextColor = p.text, unfocusedTextColor = p.text,
             ),
         )
-        Spacer(Modifier.height(10.dp))
-        LazyColumn(Modifier.heightIn(max = 420.dp)) {
-            if (t.isNotEmpty() && vids.isEmpty() && sers.isEmpty() && scis.isEmpty()) {
+        Spacer(Modifier.height(8.dp))
+        FtsCoverage(p)
+        if (ftsBusy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp).height(2.dp), color = p.gold, trackColor = p.card)
+        Spacer(Modifier.height(6.dp))
+        LazyColumn(Modifier.heightIn(max = 480.dp)) {
+            if (t.isNotEmpty() && !ftsBusy && vids.isEmpty() && sers.isEmpty() && scis.isEmpty() && groups.isEmpty()) {
                 item {
                     Column(Modifier.fillMaxWidth().padding(36.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(Icons.Filled.SearchOff, null, tint = p.muted, modifier = Modifier.size(34.dp))
@@ -584,6 +596,7 @@ fun SearchSheet(p: Pal, onLesson: (String) -> Unit, onSeries: (String) -> Unit, 
                     )
                 }
             }
+            ftsSection(p, groups, onTimed)
             if (vids.isNotEmpty()) {
                 item { SectionTitle(p, "الدروس") }
                 itemsIndexed(vids) { _, v ->

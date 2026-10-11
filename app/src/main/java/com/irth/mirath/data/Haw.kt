@@ -25,8 +25,8 @@ object Haw {
     // (الحشو ليس موحداً: 01.align مقابل 001.sum داخل السلسلة نفسها — الخرائط هي العقد)
     private val files = mutableMapOf<String, MutableMap<String, Map<Int, String>>>()
 
-    private suspend fun get(path: String): String = Api.getAbs("$BASE$path")
-    private suspend fun getJson(path: String): JsonElement = Api.json.parseToJsonElement(get(path))
+    private suspend fun get(path: String, cache: Boolean = true): String = Api.getAbs("$BASE$path", cache)
+    private suspend fun getJson(path: String, cache: Boolean = true): JsonElement = Api.json.parseToJsonElement(get(path, cache))
 
     private fun str(el: JsonElement?, d: String = "") = el?.jsonPrimitive?.content ?: d
     private fun arr(el: JsonElement?): JsonArray = el as? JsonArray ?: JsonArray(emptyList())
@@ -126,9 +126,9 @@ object Haw {
         return slug to n
     }
 
-    suspend fun align(id: String): List<AWord> {
+    suspend fun align(id: String, cache: Boolean = true): List<AWord> {
         val (slug, n) = pathsOf(id) ?: return emptyList()
-        val el = runCatching { getJson("/playlists/lessons/$slug/${file(slug, n, "align", "align.json")}") }.getOrNull() ?: return emptyList()
+        val el = runCatching { getJson("/playlists/lessons/$slug/${file(slug, n, "align", "align.json")}", cache) }.getOrNull() ?: return emptyList()
         // أوقات الكلمات في هوشات مطلقة بالثواني (تحوي الإزاحة أصلاً) — لا تُضاف off
         val o = el.jsonObject
         return arr(o["w"]).mapNotNull { w ->
@@ -139,9 +139,9 @@ object Haw {
             AWord(word, s, e)
         }
     }
-    suspend fun transcript(id: String): String {
+    suspend fun transcript(id: String, cache: Boolean = true): String {
         val (slug, n) = pathsOf(id) ?: return ""
-        return runCatching { get("/playlists/lessons/$slug/${file(slug, n, "txt", "txt")}") }.getOrDefault("")
+        return runCatching { get("/playlists/lessons/$slug/${file(slug, n, "txt", "txt")}", cache) }.getOrDefault("")
     }
     suspend fun summary(id: String): Summary? {
         val (slug, n) = pathsOf(id) ?: return null

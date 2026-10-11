@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LocalFireDepartment
+import androidx.compose.material.icons.filled.ManageSearch
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PlaylistPlay
@@ -33,7 +34,7 @@ import kotlin.math.abs
 
 /** تبويب «اليوم» — رفيق التعلم: مواظبة، استئناف، درس مقترح، قيد المشاهدة. */
 @Composable
-fun TodayScreen(p: Pal, onLesson: (String) -> Unit, onBrowse: () -> Unit) {
+fun TodayScreen(p: Pal, onLesson: (String) -> Unit, onSearch: () -> Unit = {}, onBrowse: () -> Unit) {
     Prefs.streak.value // اشتراك إعادة التركيب عند تغيّر المواظبة
     val streak = Prefs.streakDays()
     val ctx = LocalContext.current
@@ -93,6 +94,22 @@ fun TodayScreen(p: Pal, onLesson: (String) -> Unit, onBrowse: () -> Unit) {
                         if (streak > 0) "استمع اليوم لتبقيها حية" else "استمع لأي درس اليوم وابدأ سلسلة المواظبة",
                         color = p.muted, fontSize = 13.sp,
                     )
+                }
+            }
+        }
+
+        // مدخل البحث في كلام الدروس — المسألة لا العنوان
+        item {
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(999.dp)).background(p.card)
+                    .clickable { onSearch() }.padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.ManageSearch, null, tint = p.gold, modifier = Modifier.size(22.dp))
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("ابحث في كلام المشايخ", color = p.text, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text("${com.irth.mirath.data.Fts.count.value} درساً مفهرساً — النتيجة تقفز لثانيتها", color = p.muted, fontSize = 12.sp)
                 }
             }
         }

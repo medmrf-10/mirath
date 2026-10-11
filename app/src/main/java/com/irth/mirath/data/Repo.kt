@@ -73,6 +73,7 @@ object Repo {
                 runCatching { l.align = parseAlign(Api.getJson("/content/tube/$id/align.json")) }
             }
             if (l.align == null) l.align = emptyList()
+            l.align?.takeIf { it.isNotEmpty() }?.let { ws -> Fts.later { Fts.putWords(id, ws) } }
         }
         return l.align!!
     }
@@ -81,7 +82,26 @@ object Repo {
         val l = lesson(id)
         if (l.transcript == null) l.transcript = LocalLib.transcript(id)
             ?: (if (id.startsWith("H:")) runCatching { Haw.transcript(id) }.getOrDefault("") else runCatching { Api.getText("/content/tube/$id/transcript.txt") }.getOrDefault(""))
+        val v = video(id)
+        if (v != null && !v.has.contains("align")) l.transcript?.let { t -> Fts.later { Fts.putText(id, t, v.duration) } }
         return l.transcript!!
+    }
+
+    /** للفهرسة الجماعية: لا يملأ ذاكرة الدروس ولا كاش القرص (مئات الدروس). */
+    suspend fun alignNoCache(id: String): List<AWord> {
+        lessonCache[id]?.align?.takeIf { it.isNotEmpty() }?.let { return it }
+        LocalLib.alignEl(id)?.let { el -> runCatching { parseAlign(el) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { return it } }
+        if (video(id)?.has?.contains("align") != true) return emptyList()
+        return if (id.startsWith("H:")) runCatching { Haw.align(id, cache = false) }.getOrDefault(emptyList())
+        else runCatching { parseAlign(Api.getJson("/content/tube/$id/align.json", cache = false)) }.getOrDefault(emptyList())
+    }
+
+    suspend fun transcriptNoCache(id: String): String {
+        lessonCache[id]?.transcript?.takeIf { it.isNotEmpty() }?.let { return it }
+        LocalLib.transcript(id)?.let { return it }
+        if (video(id)?.has?.contains("transcript") != true) return ""
+        return if (id.startsWith("H:")) runCatching { Haw.transcript(id, cache = false) }.getOrDefault("")
+        else runCatching { Api.getText("/content/tube/$id/transcript.txt", cache = false) }.getOrDefault("")
     }
 
     suspend fun summary(id: String): Summary? {
