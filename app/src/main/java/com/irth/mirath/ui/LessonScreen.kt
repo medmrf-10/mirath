@@ -208,6 +208,9 @@ fun LessonScreen(
             if (v.has.contains("align") || v.has.contains("transcript"))
                 MTab(p, Icons.Outlined.Search, "بحث", mode == "find") { mode = "find" }
         }
+        if (mode != "live") {
+            Box(Modifier.size(1.dp).alpha(0f)) { GSurface(G.local, p) }
+        }
 
         when (mode) {
             "live" -> BoxWithConstraints(

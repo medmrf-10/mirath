@@ -189,14 +189,14 @@ fun MirathApp() {
                         }
                         NavigationBar(containerColor = p.bg, contentColor = p.muted) {
                             NavItem(p, route.contains("Today") || route.isEmpty(), "اليوم", Icons.Filled.DateRange) {
-                                nav.navigate(Today) { popUpTo(Today) { inclusive = true } }
+                                if (booted) runCatching { nav.navigate(Today) { popUpTo(Today) { inclusive = true } } }
                             }
                             NavItem(p, route.contains("Home"), "المكتبة", Icons.Filled.Home) {
-                                nav.navigate(Home) { popUpTo(Today) }
+                                if (booted) runCatching { nav.navigate(Home) { popUpTo(Today) } }
                             }
-                            NavItem(p, route.contains("Fav"), "المفضلة", Icons.Filled.Favorite) { nav.navigate(Fav) }
-                            NavItem(p, route.contains("Lib"), "مكتبتي", Icons.Filled.Folder) { nav.navigate(Lib) }
-                            NavItem(p, route.contains("Stats"), "إحصائي", Icons.Filled.BarChart) { nav.navigate(Stats) }
+                            NavItem(p, route.contains("Fav"), "المفضلة", Icons.Filled.Favorite) { if (booted) runCatching { nav.navigate(Fav) } }
+                            NavItem(p, route.contains("Lib"), "مكتبتي", Icons.Filled.Folder) { if (booted) runCatching { nav.navigate(Lib) } }
+                            NavItem(p, route.contains("Stats"), "إحصائي", Icons.Filled.BarChart) { if (booted) runCatching { nav.navigate(Stats) } }
                         }
                     }
                 },

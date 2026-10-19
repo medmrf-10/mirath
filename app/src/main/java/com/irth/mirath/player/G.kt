@@ -50,41 +50,49 @@ object G {
     private var ctxRef: Context? = null
     private var focusReq: AudioManager.OnAudioFocusChangeListener? = null
 
-    private const val YT_PAGE = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+    private const val PLAYER_ORIGIN = "https://medmrf-10.github.io"
+    private const val PLAYER_URL = "$PLAYER_ORIGIN/mirath-player.html"
+
+    private const val YT_PAGE = """<!DOCTYPE html><html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="strict-origin-when-cross-origin">
 <style>html,body{margin:0;background:#000;height:100%;overflow:hidden}#p{position:fixed;inset:0;width:100%;height:100%;border:0}</style></head>
 <body><div id="p"></div><script>
-var pl=null,rdy=false,retried={};window.ct=0;window.ps=-1;
+var pl=null,rdy=false,apiRdy=false,creating=false,retried={};window.ct=0;window.ps=-1;
 function loadApi(){
-  if(window.YT&&window.YT.Player)return;
-  var old=document.getElementById('yt-api');if(old)old.remove();
+  if(window.YT&&window.YT.Player){apiRdy=true;return;}
+  if(document.getElementById('yt-api'))return;
   var s=document.createElement('script');s.id='yt-api';
   s.src='https://www.youtube.com/iframe_api';
-  s.onerror=function(){setTimeout(loadApi,1800);};
+  s.onerror=function(){var el=document.getElementById('yt-api');if(el)el.remove();setTimeout(loadApi,1500);};
   document.body.appendChild(s);
 }
-window.loadVid=function(id,st){
-  if(!id)return;
-  var s=st||0;
-  window.__cur={id:id,st:s};
-  if(!rdy||!pl||typeof pl.loadVideoById!=='function'){
-    window.__pend={id:id,st:s};
-    loadApi();
-    return;
-  }
-  window.ct=s;window.ps=-1;
-  try{pl.loadVideoById({videoId:id,startSeconds:s});}catch(e){window.__pend={id:id,st:s};}
-};
-function onYouTubeIframeAPIReady(){
+function createPlayer(id,st){
+  creating=true;
+  console.log('MirathYT: creating player for '+id+' at '+st);
   pl=new YT.Player('p',{
     width:'100%',height:'100%',
-    playerVars:{rel:0,playsinline:1,enablejsapi:1,origin:'https://www.youtube.com'},
+    videoId:id,
+    playerVars:{rel:0,playsinline:1,enablejsapi:1,autoplay:1,start:st,origin:'https://medmrf-10.github.io'},
     events:{
-      onReady:function(){
-        rdy=true;
-        if(window.__pend){var p=window.__pend;window.__pend=null;window.loadVid(p.id,p.st);}
+      onReady:function(e){
+        rdy=true;creating=false;
+        console.log('MirathYT: onReady for '+id);
+        if(window.__pend&&window.__pend.id&&window.__pend.id!==id){
+          var p=window.__pend;window.__pend=null;
+          window.loadVid(p.id,p.st);
+        }else{
+          window.__pend=null;
+          try{if(st>0)e.target.seekTo(st,true);e.target.playVideo();}catch(err){}
+        }
       },
-      onStateChange:function(e){window.ps=e.data;},
+      onStateChange:function(e){
+        window.ps=e.data;
+        console.log('MirathYT: state='+e.data);
+      },
       onError:function(e){
+        console.log('MirathYT: onError='+e.data);
         var c=window.__cur;
         if(c&&c.id){
           var n=(retried[c.id]||0)+1;retried[c.id]=n;
@@ -98,20 +106,101 @@ function onYouTubeIframeAPIReady(){
     }
   });
 }
+window.loadVid=function(id,st){
+  if(!id)return;
+  var s=st||0;
+  console.log('MirathYT: loadVid('+id+','+s+') apiRdy='+apiRdy+' rdy='+rdy+' creating='+creating);
+  window.__cur={id:id,st:s};
+  if(!apiRdy&&!(window.YT&&window.YT.Player)){
+    window.__pend={id:id,st:s};
+    loadApi();
+    return;
+  }
+  apiRdy=true;
+  if(!pl&&!creating){
+    window.__pend=null;
+    createPlayer(id,s);
+    return;
+  }
+  if(!rdy||creating||typeof pl.loadVideoById!=='function'){
+    window.__pend={id:id,st:s};
+    return;
+  }
+  window.ct=s;window.ps=-1;
+  try{pl.loadVideoById({videoId:id,startSeconds:s});}catch(e){window.__pend={id:id,st:s};}
+};
+function onYouTubeIframeAPIReady(){
+  apiRdy=true;
+  console.log('MirathYT: onYouTubeIframeAPIReady pend='+(window.__pend?window.__pend.id:'none'));
+  if(window.__pend&&window.__pend.id){
+    var p=window.__pend;window.__pend=null;
+    window.loadVid(p.id,p.st);
+  }
+}
 setInterval(function(){try{if(rdy&&pl&&pl.getCurrentTime)window.ct=pl.getCurrentTime()}catch(e){}},200);
 loadApi();
 </script></body></html>"""
 
+    private var pageLoaded = false
+    private var pendingVid: String? = null
+    private var pendingStart: Int = 0
+
     fun ensureWeb(ctx: Context): WebView {
         webView?.let { return it }
         val appCtx = ctx.applicationContext
-        return WebView(appCtx).apply {
+        pageLoaded = false
+        return object : WebView(appCtx) {
+            override fun onWindowVisibilityChanged(visibility: Int) {
+                super.onWindowVisibilityChanged(android.view.View.VISIBLE)
+            }
+        }.apply {
             settings.javaScriptEnabled = true
             settings.mediaPlaybackRequiresUserGesture = false
             settings.domStorageEnabled = true
             settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
+            settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+            settings.userAgentString = settings.userAgentString
+                .replace("; wv)", ")")
+                .replace("Version/4.0 ", "")
             setBackgroundColor(android.graphics.Color.BLACK)
-            loadDataWithBaseURL("https://www.youtube.com", YT_PAGE, "text/html", "utf-8", null)
+            webChromeClient = object : android.webkit.WebChromeClient() {
+                override fun onConsoleMessage(cm: android.webkit.ConsoleMessage?): Boolean {
+                    android.util.Log.d("MirathYT", "${cm?.message()} @${cm?.lineNumber()}")
+                    return true
+                }
+            }
+            webViewClient = object : android.webkit.WebViewClient() {
+                override fun shouldInterceptRequest(
+                    view: WebView?,
+                    request: android.webkit.WebResourceRequest?,
+                ): android.webkit.WebResourceResponse? {
+                    val u = request?.url?.toString() ?: return null
+                    if (u.startsWith(PLAYER_URL)) {
+                        return android.webkit.WebResourceResponse(
+                            "text/html",
+                            "utf-8",
+                            200,
+                            "OK",
+                            mapOf("Access-Control-Allow-Origin" to "*"),
+                            YT_PAGE.byteInputStream(Charsets.UTF_8),
+                        )
+                    }
+                    return super.shouldInterceptRequest(view, request)
+                }
+
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    super.onPageFinished(view, url)
+                    if (url?.startsWith(PLAYER_URL) == true) {
+                        pageLoaded = true
+                        val vid = pendingVid
+                        val st = pendingStart
+                        if (!vid.isNullOrEmpty()) {
+                            view?.evaluateJavascript("if(window.loadVid)window.loadVid('$vid',$st);else window.__pend={id:'$vid',st:$st};", null)
+                        }
+                    }
+                }
+            }
+            loadUrl(PLAYER_URL)
         }.also { webView = it }
     }
 
@@ -158,6 +247,7 @@ loadApi();
         sleepAt = 0L; sleepEnd = false; pausedAtMs = 0L
         runCatching { mp?.stop(); mp?.release() }
         mp = null
+        pendingVid = null
         webView?.evaluateJavascript("try{rdy&&pl&&pl.stopVideo()}catch(e){}", null)
         videoId = null; playing = false; pos = 0.0
         ctxRef?.let { it.stopService(Intent(it, PlayerService::class.java)) }
@@ -183,6 +273,7 @@ loadApi();
         val svc = Intent(ctx, PlayerService::class.java)
         if (media != null) {
             // مسار محلي: أوقف يوتيوب، شغّل MediaPlayer
+            pendingVid = null
             webView?.evaluateJavascript("try{rdy&&pl&&pl.stopVideo()}catch(e){}", null)
             local = true
             runCatching { mp?.release() }
@@ -201,9 +292,13 @@ loadApi();
         } else {
             runCatching { mp?.pause() }
             local = false
+            pendingVid = ytId
+            pendingStart = startSec
             val wv = ensureWeb(ctx)
             if (ytId.isNotEmpty()) {
-                wv.evaluateJavascript("window.loadVid('$ytId',$startSec)", null)
+                if (pageLoaded) {
+                    wv.evaluateJavascript("if(window.loadVid)window.loadVid('$ytId',$startSec);else window.__pend={id:'$ytId',st:$startSec};", null)
+                }
             } else if (id.startsWith("H:") && id.contains(":")) {
                 val sid = id.substringBeforeLast(":")
                 com.irth.mirath.data.Haw.bg.launch(kotlinx.coroutines.Dispatchers.IO) {
@@ -212,7 +307,11 @@ loadApi();
                     if (fresh != null && fresh.yt.isNotEmpty() && videoId == id) {
                         handler.post {
                             title = fresh.title
-                            wv.evaluateJavascript("window.loadVid('${fresh.yt}',$startSec)", null)
+                            pendingVid = fresh.yt
+                            pendingStart = startSec
+                            if (pageLoaded) {
+                                wv.evaluateJavascript("if(window.loadVid)window.loadVid('${fresh.yt}',$startSec);else window.__pend={id:'${fresh.yt}',st:$startSec};", null)
+                            }
                         }
                     }
                 }
@@ -220,7 +319,7 @@ loadApi();
         }
         if (speed != 1.0) { val r = speed; handler.postDelayed({ setRate(r) }, 900) }
         runCatching { ctx.startForegroundService(svc) }
-        grabFocus()
+        if (local) grabFocus()
         tick()
     }
 
@@ -228,7 +327,7 @@ loadApi();
         val am = ctxRef?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
         if (focusReq == null) {
             focusReq = AudioManager.OnAudioFocusChangeListener { c ->
-                if (c == AudioManager.AUDIOFOCUS_LOSS || c == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) pauseAll()
+                if ((c == AudioManager.AUDIOFOCUS_LOSS || c == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) && local) pauseAll()
             }
         }
         runCatching {

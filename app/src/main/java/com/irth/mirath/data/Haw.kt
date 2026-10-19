@@ -155,7 +155,7 @@ object Haw {
                 if (sk.isEmpty()) continue
                 val sTitle = str(so["title"], sk)
                 val cat = str(so["category"])
-                val count = int(so["transcribed"]).coerceAtLeast(int(so["declared_total"]))
+                val count = int(so["transcribed"])
                 if (count <= 0) continue
                 val aligned = int(so["aligned"])
                 val totalDur = int(so["dur"])
