@@ -45,6 +45,9 @@ object Prefs {
         sp?.edit()?.putFloat("fontScale", f)?.apply()
     }
 
+    fun speed(): Float = sp?.getFloat("speed", 1f) ?: 1f
+    fun setSpeed(v: Float) { sp?.edit()?.putFloat("speed", v)?.apply() }
+
     fun isFav(id: String) = favs.value.contains(id)
 
     fun toggleFav(id: String) {

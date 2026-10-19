@@ -11,18 +11,27 @@ import android.media.MediaMetadata
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.IBinder
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /** خدمة أمامية: MediaSession حقيقية (شاشة قفل + سماعة + إعدادات سريعة) + إشعار وسائط حي. */
 class PlayerService : Service() {
     private var session: MediaSession? = null
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onBind(i: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
-            "toggle" -> { G.playPause(); return START_STICKY }
-            "back" -> { G.seek((G.pos - 15).coerceAtLeast(0.0)); return START_STICKY }
-            "fwd" -> { G.seek(G.pos + 15); return START_STICKY }
+            "toggle" -> { G.playPause(); pushState(); startForeground(11, buildNotif()); return START_STICKY }
+            "back" -> { G.seek((G.pos - 15).coerceAtLeast(0.0)); pushState(); return START_STICKY }
+            "fwd" -> { G.seek(G.pos + 15); pushState(); return START_STICKY }
+            "prev" -> { G.skipPrev(); pushState(); return START_STICKY }
+            "next" -> { G.skipNext(); pushState(); return START_STICKY }
             "stop" -> { G.stopAll(); stopSelf(); return START_NOT_STICKY }
         }
         ensureSession()
@@ -32,6 +41,7 @@ class PlayerService : Service() {
     }
 
     override fun onDestroy() {
+        serviceScope.cancel()
         session?.release(); session = null
         super.onDestroy()
     }
@@ -44,34 +54,70 @@ class PlayerService : Service() {
                 override fun onPause() = G.pause()
                 override fun onStop() { G.stopAll(); stopSelf() }
                 override fun onSeekTo(pos: Long) = G.seek(pos / 1000.0)
-                override fun onSkipToNext() { /* التالي داخل صفحة الدرس */ }
-                override fun onSkipToPrevious() {}
+                override fun onSkipToNext() { G.skipNext() }
+                override fun onSkipToPrevious() { G.skipPrev() }
+                override fun onFastForward() = G.seek(G.pos + 15)
+                override fun onRewind() = G.seek((G.pos - 15).coerceAtLeast(0.0))
+                override fun onCustomAction(action: String, extras: android.os.Bundle?) {
+                    if (action == "fwd") G.seek(G.pos + 15) else if (action == "back") G.seek((G.pos - 15).coerceAtLeast(0.0))
+                }
             })
             isActive = true
         }
         Companion.session = session
     }
 
+    private var artFor: String? = null
+    private var art: android.graphics.Bitmap? = null
+
+    /** صورة شاشة القفل: صورة الشيخ إن وُجدت، وإلا شعار ميراث — تُحمَّل مرة لكل علم عبر CoroutineScope. */
+    private fun ensureArt() {
+        val key = G.scienceId
+        if (artFor == key && art != null) return
+        artFor = key
+        art = runCatching { android.graphics.BitmapFactory.decodeResource(resources, com.irth.mirath.R.mipmap.ic_launcher_foreground) }.getOrNull()
+        val url = com.irth.mirath.data.Haw.photoOf(key) ?: return
+        serviceScope.launch {
+            val bmp = runCatching {
+                val req = coil.request.ImageRequest.Builder(this@PlayerService).data(url).allowHardware(false).size(512).build()
+                val d = coil.Coil.imageLoader(this@PlayerService).execute(req).drawable
+                (d as? android.graphics.drawable.BitmapDrawable)?.bitmap
+            }.getOrNull() ?: return@launch
+            withContext(Dispatchers.Main) {
+                if (artFor == key) {
+                    art = bmp
+                    pushState()
+                    runCatching { startForeground(11, buildNotif()) }
+                }
+            }
+        }
+    }
+
     private fun pushState() {
         val s = session ?: return
+        ensureArt()
+        var acts = PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or
+            PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_SEEK_TO or
+            PlaybackState.ACTION_STOP or PlaybackState.ACTION_FAST_FORWARD or PlaybackState.ACTION_REWIND
+        if (G.nextId != null) acts = acts or PlaybackState.ACTION_SKIP_TO_NEXT
+        acts = acts or PlaybackState.ACTION_SKIP_TO_PREVIOUS
         val st = PlaybackState.Builder()
             .setState(
                 if (G.playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED,
-                (G.pos * 1000).toLong(), G.speed.toFloat(),
+                (G.pos * 1000).toLong(), if (G.playing) G.speed.toFloat() else 0f,
             )
-            .setActions(
-                PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or
-                    PlaybackState.ACTION_PLAY_PAUSE or PlaybackState.ACTION_SEEK_TO or
-                    PlaybackState.ACTION_STOP,
-            ).build()
+            .setActions(acts)
+            .addCustomAction(PlaybackState.CustomAction.Builder("back", "رجوع 15 ثانية", android.R.drawable.ic_media_rew).build())
+            .addCustomAction(PlaybackState.CustomAction.Builder("fwd", "تقديم 15 ثانية", android.R.drawable.ic_media_ff).build())
+            .build()
         s.setPlaybackState(st)
-        s.setMetadata(
-            MediaMetadata.Builder()
-                .putString(MediaMetadata.METADATA_KEY_TITLE, G.title.ifEmpty { "ميراث" })
-                .putString(MediaMetadata.METADATA_KEY_ARTIST, "إرث")
-                .putLong(MediaMetadata.METADATA_KEY_DURATION, (G.dur * 1000).toLong())
-                .build(),
-        )
+        val md = MediaMetadata.Builder()
+            .putString(MediaMetadata.METADATA_KEY_TITLE, G.title.ifEmpty { "ميراث" })
+            .putString(MediaMetadata.METADATA_KEY_ARTIST, G.artist.ifEmpty { "ميراث" })
+            .putString(MediaMetadata.METADATA_KEY_ALBUM, G.seriesTitle.ifEmpty { "إرث" })
+            .putLong(MediaMetadata.METADATA_KEY_DURATION, (G.dur * 1000).toLong())
+        art?.let { md.putBitmap(MediaMetadata.METADATA_KEY_ART, it) }
+        s.setMetadata(md.build())
     }
 
     private fun buildNotif(): Notification {
@@ -90,25 +136,28 @@ class PlayerService : Service() {
             this, 2, Intent(this, PlayerService::class.java).setAction("stop"),
             PendingIntent.FLAG_IMMUTABLE,
         )
-        val back = PendingIntent.getService(
-            this, 3, Intent(this, PlayerService::class.java).setAction("back"),
+        fun act(code: Int, a: String) = PendingIntent.getService(
+            this, code, Intent(this, PlayerService::class.java).setAction(a),
             PendingIntent.FLAG_IMMUTABLE,
         )
-        val fwd = PendingIntent.getService(
-            this, 4, Intent(this, PlayerService::class.java).setAction("fwd"),
-            PendingIntent.FLAG_IMMUTABLE,
-        )
+        fun ic(r: Int) = android.graphics.drawable.Icon.createWithResource(this, r)
+        val sub = listOf(G.artist, G.seriesTitle).filter { it.isNotEmpty() && it != "ميراث" }.joinToString(" · ")
         return Notification.Builder(this, CH)
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentTitle(G.title.ifEmpty { "ميراث" })
-            .setContentText(if (G.playing) "قيد التشغيل" else "متوقف")
+            .setContentText(sub.ifEmpty { if (G.playing) "قيد التشغيل" else "متوقف" })
+            .setSubText(G.sleepLabel())
+            .setLargeIcon(art)
             .setContentIntent(open)
-            .addAction(Notification.Action.Builder(null, "‹15", back).build())
-            .addAction(Notification.Action.Builder(null, if (G.playing) "إيقاف" else "تشغيل", toggle).build())
-            .addAction(Notification.Action.Builder(null, "15›", fwd).build())
-            .addAction(Notification.Action.Builder(null, "إنهاء", stp).build())
-            .setOngoing(true)
-            .setStyle(Notification.MediaStyle().setShowActionsInCompactView(0, 1, 2).setMediaSession(session?.sessionToken))
+            .setDeleteIntent(stp)
+            .addAction(Notification.Action.Builder(ic(android.R.drawable.ic_media_previous), "السابق", act(5, "prev")).build())
+            .addAction(Notification.Action.Builder(ic(android.R.drawable.ic_media_rew), "‹15", act(3, "back")).build())
+            .addAction(Notification.Action.Builder(ic(if (G.playing) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play), if (G.playing) "إيقاف" else "تشغيل", toggle).build())
+            .addAction(Notification.Action.Builder(ic(android.R.drawable.ic_media_ff), "15›", act(4, "fwd")).build())
+            .addAction(Notification.Action.Builder(ic(android.R.drawable.ic_media_next), "التالي", act(6, "next")).build())
+            .setOngoing(G.playing)
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .setStyle(Notification.MediaStyle().setShowActionsInCompactView(0, 2, 4).setMediaSession(session?.sessionToken))
             .build()
     }
 
@@ -117,7 +166,7 @@ class PlayerService : Service() {
         var session: MediaSession? = null
             private set
 
-        /** يُستدعى من نبض G كل ~3 ثوانٍ: يحدّث الإشعار وحالة الوسائط على شاشة القفل. */
+        /** يُستدعى من نبض G كل ~5 ثوانٍ: يحدّث الإشعار وحالة الوسائط على شاشة القفل. */
         fun refresh(ctx: Context?) {
             ctx ?: return
             runCatching {

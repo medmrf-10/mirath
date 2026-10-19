@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DateRange
+import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.*
@@ -33,6 +34,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.NavHost
@@ -44,6 +46,7 @@ import com.irth.mirath.data.Api
 import com.irth.mirath.data.Haw
 import com.irth.mirath.data.Repo
 import com.irth.mirath.data.LocalLib
+import com.irth.mirath.data.TextIndex
 import com.irth.mirath.player.G
 import com.irth.mirath.data.Update
 import com.irth.mirath.store.Prefs
@@ -60,7 +63,7 @@ import kotlinx.serialization.Serializable
 @Serializable object Lib
 @Serializable data class ScienceR(val id: String)
 @Serializable data class SeriesR(val id: String)
-@Serializable data class LessonR(val id: String)
+@Serializable data class LessonR(val id: String, val at: Int = -1)
 @Serializable data class RoadmapR(val id: String)
 @Serializable data class ExamR(val seriesId: String)
 
@@ -70,6 +73,7 @@ class MainActivity : ComponentActivity() {
         Prefs.init(applicationContext)
         Api.init(applicationContext)
         LocalLib.init(applicationContext)
+        TextIndex.init(applicationContext)
         enableEdgeToEdge()
         setContent { MirathApp() }
     }
@@ -116,11 +120,11 @@ fun MirathApp() {
                     val title = when {
                         route.contains("LessonR") -> "ميراث"
                         route.contains("SeriesR") -> Repo.seriesOf(backEntry?.arguments?.getString("id") ?: "")?.title ?: "ميراث"
-                        route.contains("ScienceR") -> "إرث"
+                        route.contains("ScienceR") -> Repo.sciences?.firstOrNull { it.id == (backEntry?.arguments?.getString("id") ?: "") }?.name ?: "ميراث"
                         route.contains("Fav") -> "المفضلة"
                         route.contains("Stats") -> "إحصائي"
                         route.contains("Today") -> "يومك"
-                        else -> "إرث"
+                        else -> "ميراث"
                     }
                     TopGlassBar(
                         p, title,
@@ -136,7 +140,7 @@ fun MirathApp() {
                         update?.let { u ->
                             Row(
                                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)
-                                    .background(p.card, androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                                    .background(p.card, RoundedCornerShape(12.dp))
                                     .padding(horizontal = 14.dp, vertical = 8.dp),
                                 verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
                             ) {
@@ -144,11 +148,11 @@ fun MirathApp() {
                                 TextButton(onClick = { Update.download(ctx, u, "mirath") }) { Text("نزّل الآن", color = p.primary) }
                             }
                         }
-                        // mini-player — شريط المشغّل العالمي يتبعك في كل الشاشات
-                        if (G.videoId != null && !route.contains("LessonR") || route.contains("RoadmapR")) {
+                        // mini-player — شريط المشغّل العالمي يتبعك في كل الشاشات خارج شاشة الدرس
+                        if (G.videoId != null && !route.contains("LessonR")) {
                             Column(
                                 Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
-                                    .clip(androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+                                    .clip(RoundedCornerShape(14.dp))
                                     .background(p.card)
                                     .clickable { G.videoId?.let { nav.navigate(LessonR(it)) } }
                                     .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -161,28 +165,38 @@ fun MirathApp() {
                                     )
                                     Spacer(Modifier.width(10.dp))
                                     Column(Modifier.weight(1f)) {
-                                        Text(G.title, color = p.text, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
-                                        if (G.dur > 0) Text(fmtT(G.pos) + " / " + fmtT(G.dur), color = p.muted, style = MaterialTheme.typography.labelSmall)
+                                        Text(G.title, color = p.text, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        val sub = buildString {
+                                            if (G.artist.isNotEmpty() && G.artist != "ميراث") append(G.artist).append(" · ")
+                                            if (G.dur > 0) append(fmtT(G.pos)).append(" / ").append(fmtT(G.dur))
+                                            G.sleepLabel()?.let { append(" · ").append(it) }
+                                        }
+                                        if (sub.isNotEmpty()) Text(sub, color = p.muted, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                    if (G.nextId != null) {
+                                        IconButton(onClick = { G.skipNext() }) {
+                                            Icon(Icons.Filled.SkipNext, "التالي", tint = p.muted, modifier = Modifier.size(20.dp))
+                                        }
                                     }
                                     IconButton(onClick = { G.stopAll() }) {
                                         Icon(Icons.Filled.Close, "إيقاف", tint = p.muted, modifier = Modifier.size(18.dp))
                                     }
                                 }
-                                if (G.dur > 0) Box(Modifier.fillMaxWidth().padding(top = 6.dp).height(3.dp).background(p.soft, androidx.compose.foundation.shape.RoundedCornerShape(3.dp))) {
-                                    Box(Modifier.fillMaxWidth((G.pos / G.dur).toFloat().coerceIn(0f, 1f)).fillMaxHeight().background(p.gold, androidx.compose.foundation.shape.RoundedCornerShape(3.dp)))
+                                if (G.dur > 0) Box(Modifier.fillMaxWidth().padding(top = 6.dp).height(3.dp).background(p.soft, RoundedCornerShape(3.dp))) {
+                                    Box(Modifier.fillMaxWidth((G.pos / G.dur).toFloat().coerceIn(0f, 1f)).fillMaxHeight().background(p.gold, RoundedCornerShape(3.dp)))
                                 }
                             }
                         }
                         NavigationBar(containerColor = p.bg, contentColor = p.muted) {
-                        NavItem(p, route.contains("Today") || route.isEmpty(), "اليوم", Icons.Filled.DateRange) {
-                            nav.navigate(Today) { popUpTo(Today) { inclusive = true } }
-                        }
-                        NavItem(p, route.contains("Home"), "المكتبة", Icons.Filled.Home) {
-                            nav.navigate(Home) { popUpTo(Today) }
-                        }
-                        NavItem(p, route.contains("Fav"), "المفضلة", Icons.Filled.Favorite) { nav.navigate(Fav) }
-                        NavItem(p, route.contains("Lib"), "مكتبتي", Icons.Filled.Folder) { nav.navigate(Lib) }
-                        NavItem(p, route.contains("Stats"), "إحصائي", Icons.Filled.BarChart) { nav.navigate(Stats) }
+                            NavItem(p, route.contains("Today") || route.isEmpty(), "اليوم", Icons.Filled.DateRange) {
+                                nav.navigate(Today) { popUpTo(Today) { inclusive = true } }
+                            }
+                            NavItem(p, route.contains("Home"), "المكتبة", Icons.Filled.Home) {
+                                nav.navigate(Home) { popUpTo(Today) }
+                            }
+                            NavItem(p, route.contains("Fav"), "المفضلة", Icons.Filled.Favorite) { nav.navigate(Fav) }
+                            NavItem(p, route.contains("Lib"), "مكتبتي", Icons.Filled.Folder) { nav.navigate(Lib) }
+                            NavItem(p, route.contains("Stats"), "إحصائي", Icons.Filled.BarChart) { nav.navigate(Stats) }
                         }
                     }
                 },
@@ -231,7 +245,11 @@ fun MirathApp() {
                         }
                         composable<LessonR> { e ->
                             val r = e.toRoute<LessonR>()
-                            LessonScreen(p, r.id, onLesson = { nav.navigate(LessonR(it)) { launchSingleTop = true } })
+                            LessonScreen(
+                                p, r.id, r.at,
+                                onLesson = { nav.navigate(LessonR(it)) { launchSingleTop = true } },
+                                onFollow = { nav.navigate(LessonR(it)) { popUpTo<LessonR> { inclusive = true } } },
+                            )
                         }
                         composable<RoadmapR> { e ->
                             val r = e.toRoute<RoadmapR>()
@@ -253,6 +271,7 @@ fun MirathApp() {
                         onLesson = { id -> showSearch = false; nav.navigate(LessonR(id)) },
                         onSeries = { id -> showSearch = false; nav.navigate(SeriesR(id)) },
                         onScience = { id -> showSearch = false; nav.navigate(ScienceR(id)) },
+                        onHit = { id, sec -> showSearch = false; nav.navigate(LessonR(id, sec)) },
                     )
                 }
             }

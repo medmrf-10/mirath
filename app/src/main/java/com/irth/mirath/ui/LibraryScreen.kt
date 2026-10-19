@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.AudioFile
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -26,20 +27,23 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.irth.mirath.data.Backup
+import com.irth.mirath.data.Haw
 import com.irth.mirath.data.LocalLib
 import com.irth.mirath.data.Repo
 import com.irth.mirath.data.Roadmaps
 import com.irth.mirath.data.Sync
+import com.irth.mirath.store.Prefs
 import com.irth.mirath.ui.theme.Pal
 import kotlinx.coroutines.launch
 
 /**
  * مكتبتي — سلاسل المستخدم: ينشئها بنفسه (يدوياً أو من قائمة يوتيوب)، يرتّبها في مجلدات،
- * يستورد حزم الوكيل والملفات المفردة، ويشغّلها بلا إنترنت.
+ * يستورد حزم الوكيل والملفات المفردة، ويشغّلها بلا إنترنت، مع تحديث مباشر من مستودع ytb الحي.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -57,13 +61,13 @@ fun LibraryScreen(p: Pal, onSeries: (String) -> Unit, onRoadmap: (String) -> Uni
     var authCode by remember { mutableStateOf<Sync.DeviceCode?>(null) }
     val local = remember(rev) { LocalLib.localSeries() }
     val rms = remember(rev) { Roadmaps.all(ctx) }
+    val srcRev = Prefs.srcRev.value
 
     fun after(n: Int) {
         if (n > 0) { Repo.mergeLocal(); rev++; msg = "استُورد $n ملفاً — أُضيفت لمكتبتك" }
         else msg = "لم تُضَف ملفات"
     }
 
-    // مزامنة تلقائية: سحب عند الفتح، ورفع بعد أي تغيير في المحتوى — «يزامن مع الريبو»
     LaunchedEffect(Unit) {
         if (Sync.signedIn()) {
             val n = Sync.pull(ctx)
@@ -89,10 +93,42 @@ fun LibraryScreen(p: Pal, onSeries: (String) -> Unit, onRoadmap: (String) -> Uni
 
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         item {
-            // إنشاء سلسلة — الإجراء الرئيسي (منصة عامة: المستخدم يبني مكتبته)
+            // بطاقة مستودع ytb الحي
+            val scCount = Repo.sciences?.size ?: 0
+            val srCount = Repo.series?.size ?: 0
+            val vdCount = Repo.videos?.size ?: 0
+            val alCount = Repo.videos?.count { it.has.contains("align") } ?: 0
+            Row(
+                Modifier.fillMaxWidth().padding(top = 14.dp)
+                    .clip(RoundedCornerShape(14.dp)).background(p.card)
+                    .border(1.dp, p.line, RoundedCornerShape(14.dp))
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("مستودع التراث الحي (ytb)", color = p.gold, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                    Text("$scCount شيخاً · $srCount سلسلة · $vdCount درساً ($alCount محاذى حياً)", color = p.muted, fontSize = 12.sp)
+                }
+                IconButton(
+                    onClick = {
+                        scope.launch {
+                            busy = true
+                            val ok = Haw.refreshCatalog()
+                            if (ok) Haw.prefetchAll(scope)
+                            busy = false
+                            msg = if (ok) "حُدّث الفهرس الحي من مستودع ytb" else "تعذّر التحديث — تحقّق من الاتصال"
+                        }
+                    },
+                    enabled = !busy,
+                ) {
+                    Icon(Icons.Filled.Refresh, "تحديث الفهرس الحي", tint = p.gold)
+                }
+            }
+
+            // إنشاء سلسلة — الإجراء الرئيسي
             Button(
                 onClick = { createUrl = ""; showCreate = true },
-                modifier = Modifier.fillMaxWidth().padding(top = 16.dp).height(52.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp).height(52.dp),
                 shape = RoundedCornerShape(16.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = p.primary),
             ) {
@@ -303,13 +339,12 @@ fun LibraryScreen(p: Pal, onSeries: (String) -> Unit, onRoadmap: (String) -> Uni
             item {
                 Column(Modifier.fillMaxWidth().padding(vertical = 28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Outlined.AudioFile, null, tint = p.muted, modifier = Modifier.size(36.dp))
-                    Text("لا سلاسل بعد — أنشئ أولى سلاسلك", color = p.muted, fontSize = 14.sp, modifier = Modifier.padding(top = 8.dp))
-                    Text("أو استورد حزمة الوكيل أو رابط قائمة يوتيوب من الأعلى", color = p.muted, fontSize = 12.sp, textAlign = TextAlign.Center)
+                    Text("لا سلاسل محلية مخصّصة بعد — كل سلاسل المشايخ متاحة في «المكتبة»", color = p.muted, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp))
+                    Text("أو أنشئ سلسلتك الخاصة واستورد ملفاتك الصوتية من الأعلى", color = p.muted, fontSize = 12.sp, textAlign = TextAlign.Center)
                 }
             }
         }
 
-        // مجموعات حسب المجلد (متداخلة مثل «فقه/ابن-باز»)
         local.groupBy { it.folder }.toSortedMap().forEach { (fold, list) ->
             if (fold.isNotEmpty()) {
                 item(key = "fold:$fold") {

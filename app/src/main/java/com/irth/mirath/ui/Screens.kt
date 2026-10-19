@@ -7,9 +7,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AttachFile
@@ -29,7 +31,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -40,6 +41,7 @@ import com.irth.mirath.data.Haw
 import com.irth.mirath.data.LocalLib
 import com.irth.mirath.data.QA
 import com.irth.mirath.data.Repo
+import com.irth.mirath.data.TextIndex
 import com.irth.mirath.store.Prefs
 import com.irth.mirath.ui.theme.Pal
 import kotlinx.coroutines.launch
@@ -51,16 +53,19 @@ private fun progressBar(id: String, duration: Int): Float {
 
 @Composable
 fun HomeScreen(p: Pal, onScience: (String) -> Unit, onLesson: (String) -> Unit) {
+    val srcRev = Prefs.srcRev.value
     val sciences = Repo.sciences
     if (sciences == null) { LoadingBox(p); return }
     val lastId = Prefs.last()
     val lastV = lastId?.let { Repo.video(it) }
     val recent = Prefs.recent.value.mapNotNull { Repo.video(it) }.filter { Prefs.progress(it.id) > 10 }.take(4)
+    val totalSeries = Repo.series?.size ?: 0
+    val totalLessons = Repo.videos?.size ?: 0
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         item {
             Column(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("العلوم", style = MaterialTheme.typography.displayLarge, color = p.text)
-                Text("اختر علماً لتصف سلاسله", color = p.muted, style = MaterialTheme.typography.bodyMedium)
+                Text("العلماء والمشايخ", style = MaterialTheme.typography.displayLarge, color = p.text)
+                Text("${sciences.size} شيخاً · $totalSeries سلسلة · $totalLessons درساً", color = p.muted, style = MaterialTheme.typography.bodyMedium)
             }
         }
         if (lastV != null && Prefs.ongoing(lastV.id, lastV.duration)) {
@@ -106,56 +111,95 @@ fun HomeScreen(p: Pal, onScience: (String) -> Unit, onLesson: (String) -> Unit) 
                 }
             }
         }
-        item { SectionTitle(p, "العلوم") }
+        item { SectionTitle(p, "المشايخ") }
         itemsIndexed(sciences) { i, s ->
-            RowCard(p, i, s.name, onClick = { onScience(s.id) }, leading = {
-                val ph = Haw.photoOf(s.id)
-                if (ph != null) coil.compose.AsyncImage(model = ph, contentDescription = s.name,
-                    modifier = Modifier.size(44.dp).clip(androidx.compose.foundation.shape.CircleShape),
-                    contentScale = androidx.compose.ui.layout.ContentScale.Crop)
-                else PhIcon(p, s.name.first().toString())
-            })
+            val scSeries = Repo.seriesOfScience(s.id)
+            val sCount = if (s.seriesCount > 0) s.seriesCount else scSeries.size
+            val lCount = if (s.lessonsCount > 0) s.lessonsCount else scSeries.sumOf { it.items.size }
+            val aCount = if (s.alignedCount > 0) s.alignedCount else scSeries.sumOf { it.alignedCount }
+            val meta = buildString {
+                if (sCount > 0) append("$sCount سلسلة")
+                if (lCount > 0) {
+                    if (isNotEmpty()) append(" · ")
+                    append("$lCount درساً")
+                }
+            }
+            val tag = if (aCount > 0) "حيّ $aCount" else ""
+            RowCard(
+                p, i, s.name,
+                meta = meta,
+                tag = tag,
+                onClick = { onScience(s.id) },
+                leading = {
+                    val ph = Haw.photoOf(s.id)
+                    if (ph != null) coil.compose.AsyncImage(
+                        model = ph, contentDescription = s.name,
+                        modifier = Modifier.size(44.dp).clip(androidx.compose.foundation.shape.CircleShape),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    )
+                    else PhIcon(p, s.name.firstOrNull()?.toString() ?: "م")
+                },
+            )
         }
     }
 }
 
 @Composable
 fun ScienceScreen(p: Pal, scienceId: String, onSeries: (String) -> Unit, onLesson: (String) -> Unit) {
+    val srcRev = Prefs.srcRev.value
     val science = Repo.sciences?.firstOrNull { it.id == scienceId }
-    val series = Repo.seriesOfScience(scienceId)
+    val allSeries = Repo.seriesOfScience(scienceId)
     val works = Repo.worksOfScience(scienceId)
-    var dlMsg by remember { mutableStateOf<String?>(null) }
-    var dlBusy by remember { mutableStateOf(false) }
+    val categories = remember(allSeries) {
+        allSeries.map { it.kind.trim() }.filter { it.isNotEmpty() }.distinct()
+    }
+    var selectedCat by remember(scienceId) { mutableStateOf("") }
+    var onlyAligned by remember(scienceId) { mutableStateOf(false) }
+    val series = remember(allSeries, selectedCat, onlyAligned) {
+        allSeries.filter { s ->
+            (selectedCat.isEmpty() || s.kind.trim() == selectedCat) &&
+                (!onlyAligned || s.alignedCount > 0)
+        }
+    }
+
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         item {
-            Column(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Column(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Haw.photoOf(scienceId)?.let { ph ->
-                    coil.compose.AsyncImage(model = ph, contentDescription = science?.name,
+                    coil.compose.AsyncImage(
+                        model = ph, contentDescription = science?.name,
                         modifier = Modifier.padding(bottom = 8.dp).size(88.dp).clip(androidx.compose.foundation.shape.CircleShape),
-                        contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    )
                 }
                 Text(science?.name ?: "", style = MaterialTheme.typography.displayLarge, color = p.text)
-                if (scienceId.startsWith("H:")) {
-                    TextButton(
-                        onClick = {
-                            dlBusy = true
-                            Haw.bg.launch {
-                                var done = 0; var tot = 0
-                                for (sr in series) {
-                                    runCatching { Haw.ensure(sr.id) }
-                                    val items = Repo.seriesOf(sr.id)?.items ?: continue
-                                    tot += items.size
-                                    for (vid in items) {
-                                        runCatching { Repo.transcript(vid); Repo.summary(vid); Repo.align(vid) }
-                                        done++; dlMsg = "نزّل $done درساً…"
-                                    }
-                                }
-                                dlBusy = false
-                                dlMsg = "كل طبقات الشيخ بلا نت ($tot درساً)"
-                            }
-                        },
-                        enabled = !dlBusy,
-                    ) { Text(dlMsg ?: "نزّل كل الطبقات", color = if (dlBusy) p.muted else p.gold, fontSize = 13.sp) }
+                val totalL = allSeries.sumOf { if (it.lessonsCount > 0) it.lessonsCount else it.items.size }
+                val totalA = allSeries.sumOf { it.alignedCount }
+                Text(
+                    "${allSeries.size} سلسلة · $totalL درساً" + if (totalA > 0) " · $totalA محاذى حياً" else "",
+                    color = p.muted, fontSize = 13.sp,
+                )
+            }
+        }
+        if (categories.size > 1 || allSeries.any { it.alignedCount > 0 }) {
+            item {
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FilterChipItem(p, "الكل (${allSeries.size})", selectedCat.isEmpty() && !onlyAligned) {
+                        selectedCat = ""; onlyAligned = false
+                    }
+                    if (allSeries.any { it.alignedCount > 0 }) {
+                        FilterChipItem(p, "محاذى حياً", onlyAligned) {
+                            onlyAligned = !onlyAligned
+                        }
+                    }
+                    categories.forEach { cat ->
+                        FilterChipItem(p, cat, selectedCat == cat) {
+                            selectedCat = if (selectedCat == cat) "" else cat
+                        }
+                    }
                 }
             }
         }
@@ -167,33 +211,51 @@ fun ScienceScreen(p: Pal, scienceId: String, onSeries: (String) -> Unit, onLesso
         }
         item { SectionTitle(p, "السلاسل") }
         itemsIndexed(series) { i, s ->
-            val n = s.items.size
+            val n = if (s.items.isNotEmpty()) s.items.size else s.lessonsCount
             val nw = s.items.count { Prefs.progress(it) <= 10 }
             val finN = s.items.count { vid -> Repo.video(vid)?.let { Prefs.finished(vid, it.duration) } == true }
             val wp = if (n > 0) finN * 100 / n else 0
             val tag = when {
                 wp == 100 -> "اكتملت ✓"
-                nw == n -> "لم تشاهدها"
-                nw > 0 -> pl3(nw, "درس جديد", "درسان جديدان", "دروس جديدة", "درساً جديداً")
+                s.alignedCount > 0 -> "حيّ ${s.alignedCount}/$n"
+                nw in 1 until n -> pl3(nw, "درس جديد", "درسان جديدان", "دروس جديدة", "درساً جديداً")
                 else -> ""
             }
-            val sheikh = s.items.firstOrNull()?.let { Repo.video(it)?.speakers?.firstOrNull() }?.let { Repo.personName(it) } ?: ""
+            val durStr = if (s.duration > 0) fmtDur(s.duration) else ""
             RowCard(
                 p, i, s.title,
-                meta = listOf(pl3(n, "درس", "درسان", "دروس", "درساً"), sheikh, s.kind).filter { it.isNotEmpty() }.joinToString(" · "),
+                meta = listOf(pl3(n, "درس", "درسان", "دروس", "درساً"), durStr, s.kind).filter { it.isNotEmpty() }.joinToString(" · "),
                 tag = tag,
                 bar = if (wp in 1..99) wp / 100f else 0f,
-                leading = { PhIcon(p, s.title.first().toString()) },
+                leading = { PhIcon(p, s.title.firstOrNull()?.toString() ?: "س") },
                 onClick = { onSeries(s.id) },
             )
         }
-        if (series.isEmpty()) item { EmptyBox(p, "لا سلاسل بعد") }
+        if (series.isEmpty()) item { EmptyBox(p, "لا سلاسل تطابق الفلتر المختار") }
+    }
+}
+
+@Composable
+private fun FilterChipItem(p: Pal, label: String, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.clip(RoundedCornerShape(999.dp))
+            .background(if (selected) p.soft else p.card)
+            .border(1.dp, if (selected) p.gold else p.line, RoundedCornerShape(999.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+    ) {
+        Text(
+            label,
+            color = if (selected) p.gold else p.muted,
+            fontSize = 12.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+        )
     }
 }
 
 @Composable
 fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit, onExam: (String) -> Unit = {}) {
-    val srcRev = Prefs.srcRev.value  // إعادة تركيب بعد تحميل دروس هوشات كسولاً
+    val srcRev = Prefs.srcRev.value
     LaunchedEffect(seriesId) { runCatching { Haw.ensure(seriesId) } }
     val s = Repo.seriesOf(seriesId)
     if (s == null) { EmptyBox(p, "السلسلة غير موجودة"); return }
@@ -202,8 +264,7 @@ fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit, onExam: (
     var linkMsg by remember { mutableStateOf<String?>(null) }
     var linkBusy by remember { mutableStateOf(false) }
     val hasMedia = remember(seriesId, Prefs.srcRev.value) { LocalLib.seriesHasMedia(seriesId, s.items) }
-    // مراجعة الربط قبل التثبيت: نعرض «درس ← ملف» كاملاً فلا يُربط أعمى (بأمر محمد)
-    var linkPlan by remember { mutableStateOf<List<Pair<String, String>>?>(null) }  // (vid, اسم الملف)
+    var linkPlan by remember { mutableStateOf<List<Pair<String, String>>?>(null) }
     var linkMedia by remember { mutableStateOf<List<Pair<String, Uri>>>(emptyList()) }
     var dlBusy by remember { mutableStateOf(false) }
     var dlMsg by remember { mutableStateOf<String?>(null) }
@@ -221,7 +282,6 @@ fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit, onExam: (
             }
         }
     }
-    // إرفاق ملف بدرس محدد — سهل وبسيط كما أمر محمد: أيقونة مشبك على كل درس
     var attachFor by remember { mutableStateOf<String?>(null) }
     val attachPick = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u ->
         val tgt = attachFor
@@ -239,10 +299,15 @@ fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit, onExam: (
         item {
             Column(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(s.title, style = MaterialTheme.typography.displayLarge, color = p.text)
-                Text(pl3(s.items.size, "درس", "درسان", "دروس", "درساً"), color = p.gold, style = MaterialTheme.typography.labelMedium)
+                val alCount = s.items.count { Repo.video(it)?.has?.contains("align") == true }
+                Text(
+                    pl3(s.items.size, "درس", "درسان", "دروس", "درساً") +
+                        if (alCount > 0) " · $alCount محاذى حياً" else "",
+                    color = p.gold, style = MaterialTheme.typography.labelMedium,
+                )
             }
         }
-        if (finN > 0) {
+        if (finN > 0 && s.items.isNotEmpty()) {
             item {
                 Column(Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
                     Text("شاهدت ${pl3(finN, "درساً واحداً", "درسين", "دروساً", "درساً")} من ${s.items.size}", color = p.muted, fontSize = 13.sp)
@@ -255,11 +320,12 @@ fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit, onExam: (
         item {
             Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 OutlinedButton(
-                    onClick = { onLesson(cont ?: s.items.first()) },
+                    onClick = { s.items.firstOrNull()?.let { firstId -> onLesson(cont ?: firstId) } },
                     modifier = Modifier.weight(1f).height(44.dp),
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = p.gold),
                     border = androidx.compose.foundation.BorderStroke(1.dp, p.line),
+                    enabled = s.items.isNotEmpty(),
                 ) {
                     Icon(Icons.Filled.PlayArrow, null, tint = p.gold)
                     Spacer(Modifier.width(6.dp))
@@ -311,8 +377,9 @@ fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit, onExam: (
                     onClick = {
                         val send = Intent(Intent.ACTION_SEND).apply {
                             type = "text/plain"
-                            val shareUrl = if (seriesId.startsWith("H:")) "https://medmrf-10.github.io/hawshat/playlists/d.html?s=${seriesId.removePrefix("H:")}" else "https://medmrf-10.github.io/irth/#/series/$seriesId"
-                            putExtra(Intent.EXTRA_TEXT, "${s.title} — إرث\n$shareUrl")
+                            val firstYt = s.items.firstOrNull()?.let { Repo.video(it)?.yt }.orEmpty()
+                            val shareUrl = if (firstYt.isNotEmpty()) "https://youtu.be/$firstYt" else "https://github.com/medmrf-10/ytb"
+                            putExtra(Intent.EXTRA_TEXT, "${s.title} — ميراث\n$shareUrl")
                         }
                         ctx.startActivity(Intent.createChooser(send, "مشاركة السلسلة"))
                     },
@@ -325,7 +392,6 @@ fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit, onExam: (
             if (linkBusy || dlBusy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 6.dp), color = p.gold, trackColor = p.soft)
             linkMsg?.let { Text(it, color = p.gold, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp)) }
             dlMsg?.let { Text(it, color = p.gold, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp)) }
-            // اختبار السلسلة — يجمع أسئلة كل دروسها في امتحان واحد
             if (s.items.any { Repo.video(it)?.has?.contains("questions") == true }) {
                 OutlinedButton(
                     onClick = { onExam(seriesId) },
@@ -345,14 +411,19 @@ fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit, onExam: (
             val pv = Prefs.progress(vid)
             val fin = Prefs.finished(vid, v.duration)
             val ong = Prefs.ongoing(vid, v.duration)
+            val hasAlign = v.has.contains("align")
             val meta = buildString {
-                append(fmtDur(v.duration))
-                if (ong) append(" · متبقٍ ").append(fmtDur((v.duration - pv).coerceAtLeast(0)))
+                if (v.duration > 0) append(fmtDur(v.duration))
+                if (ong) {
+                    if (isNotEmpty()) append(" · ")
+                    append("متبقٍ ").append(fmtDur((v.duration - pv).coerceAtLeast(0)))
+                }
                 if (Prefs.isFav(vid)) append(" · ♥")
             }
             RowCard(
                 p, i, v.title,
                 meta = meta,
+                tag = if (hasAlign) "حيّ" else "",
                 dim = fin,
                 bar = if (ong && !fin) progressBar(vid, v.duration) else 0f,
                 leading = { PhIcon(p, "${i + 1}", done = fin) },
@@ -374,7 +445,6 @@ fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit, onExam: (
         }
     }
 
-    // شاشة مراجعة الربط: كل درس ← ملفه قبل أي نسخ — لا ربط أعمى
     linkPlan?.let { plan ->
         AlertDialog(
             onDismissRequest = { linkPlan = null },
@@ -424,9 +494,10 @@ fun FavScreen(p: Pal, onLesson: (String) -> Unit) {
         itemsIndexed(favs) { i, v ->
             RowCard(
                 p, i, v.title, meta = fmtDur(v.duration),
+                tag = if (v.has.contains("align")) "حيّ" else "",
                 dim = Prefs.finished(v.id, v.duration),
                 bar = progressBar(v.id, v.duration).takeIf { Prefs.ongoing(v.id, v.duration) } ?: 0f,
-                leading = { PhIcon(p, v.title.first().toString(), done = Prefs.finished(v.id, v.duration)) },
+                leading = { PhIcon(p, v.title.firstOrNull()?.toString() ?: "د", done = Prefs.finished(v.id, v.duration)) },
                 trailing = {
                     IconButton(onClick = { Prefs.toggleFav(v.id) }) {
                         Icon(Icons.Filled.Favorite, null, tint = p.gold)
@@ -435,7 +506,7 @@ fun FavScreen(p: Pal, onLesson: (String) -> Unit) {
                 onClick = { onLesson(v.id) },
             )
         }
-        Prefs.bmRev.value // اشتراك إعادة التركيب للعلامات
+        Prefs.bmRev.value
         val bms = Prefs.allBookmarks()
         if (bms.isNotEmpty()) {
             item {
@@ -467,6 +538,7 @@ fun StatsScreen(p: Pal, onLesson: (String) -> Unit = {}) {
     val ong = vids.count { Prefs.ongoing(it.id, it.duration) }
     val fav = Prefs.favs.value.size
     val total = vids.size
+    val aligned = vids.count { it.has.contains("align") }
     val totalDur = vids.sumOf { it.duration }
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         item {
@@ -475,9 +547,11 @@ fun StatsScreen(p: Pal, onLesson: (String) -> Unit = {}) {
             }
         }
         item {
-            StatRow(p, "الدروس الكلية", "$total")
-            StatRow(p, "مدة المكتبة", fmtDur(totalDur))
+            StatRow(p, "المشايخ", "${Repo.sciences?.size ?: 0}")
             StatRow(p, "السلاسل", "${Repo.series?.size ?: 0}")
+            StatRow(p, "الدروس الكلية", "$total")
+            StatRow(p, "دروس المحاذاة الحية", "$aligned", if (total > 0) aligned.toFloat() / total else 0f)
+            if (totalDur > 0) StatRow(p, "مدة المكتبة", fmtDur(totalDur))
             StatRow(p, "دروس فتحتها", "$opened", if (total > 0) opened.toFloat() / total else 0f)
             StatRow(p, "قيد المشاهدة", "$ong", if (total > 0) ong.toFloat() / total else 0f)
             StatRow(p, "دروس أتممتها", "$fin", if (total > 0) fin.toFloat() / total else 0f)
@@ -529,17 +603,25 @@ private fun StatRow(p: Pal, k: String, v: String, frac: Float = -1f) {
 }
 
 @Composable
-fun SearchSheet(p: Pal, onLesson: (String) -> Unit, onSeries: (String) -> Unit, onScience: (String) -> Unit) {
+fun SearchSheet(
+    p: Pal,
+    onLesson: (String) -> Unit,
+    onSeries: (String) -> Unit,
+    onScience: (String) -> Unit,
+    onHit: (String, Int) -> Unit = { id, _ -> onLesson(id) },
+) {
     var q by remember { mutableStateOf("") }
+    var inText by remember { mutableStateOf(Prefs.str("search.scope") == "text") }
     val t = q.trim()
+    val ft = TextIndex.fold(t)
     val vids = remember(t) { Repo.search(t).take(30) }
-    val sers = remember(t) { if (t.isEmpty()) emptyList() else Repo.series?.filter { it.title.contains(t) }?.take(10) ?: emptyList() }
-    val scis = remember(t) { if (t.isEmpty()) emptyList() else Repo.sciences?.filter { it.name.contains(t) } ?: emptyList() }
+    val sers = remember(ft) { if (ft.isEmpty()) emptyList() else Repo.series?.filter { TextIndex.fold(it.title).contains(ft) }?.take(12) ?: emptyList() }
+    val scis = remember(ft) { if (ft.isEmpty()) emptyList() else Repo.sciences?.filter { TextIndex.fold(it.name).contains(ft) } ?: emptyList() }
     Column(Modifier.fillMaxWidth().padding(16.dp)) {
         OutlinedTextField(
             value = q, onValueChange = { q = it },
             modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("ابحث: درساً أو سلسلة أو علماً…", color = p.muted) },
+            placeholder = { Text(if (inText) "عبارة سمعتها في درس…" else "ابحث: درساً أو سلسلة أو شيخاً…", color = p.muted) },
             leadingIcon = { Icon(Icons.Filled.Search, null, tint = p.muted) },
             trailingIcon = {
                 if (q.isNotEmpty()) IconButton(onClick = { q = "" }) { Icon(Icons.Filled.Close, null, tint = p.muted) }
@@ -551,18 +633,51 @@ fun SearchSheet(p: Pal, onLesson: (String) -> Unit, onSeries: (String) -> Unit, 
                 cursorColor = p.gold, focusedTextColor = p.text, unfocusedTextColor = p.text,
             ),
         )
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(8.dp))
+        // نطاق البحث: العناوين | داخل نصوص الدروس
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(999.dp)).background(p.bg).border(1.dp, p.line, RoundedCornerShape(999.dp)).padding(3.dp),
+        ) {
+            listOf(false to "العناوين", true to "داخل الدروس").forEach { (txt, label) ->
+                val on = inText == txt
+                Box(
+                    Modifier.weight(1f).height(40.dp).clip(RoundedCornerShape(999.dp))
+                        .background(if (on) p.soft else androidx.compose.ui.graphics.Color.Transparent)
+                        .clickable { inText = txt; Prefs.putStr("search.scope", if (txt) "text" else "") },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(label, color = if (on) p.primary else p.muted, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, fontSize = 14.sp)
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        if (inText) {
+            TextSearchPane(p, q, onQuery = { q = it }, onHit = onHit)
+            return@Column
+        }
         LazyColumn(Modifier.heightIn(max = 420.dp)) {
+            if (t.length >= 2) item {
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { inText = true; Prefs.putStr("search.scope", "text") }
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.Search, null, tint = p.gold, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("ابحث عن «$t» داخل نصوص الدروس", color = p.gold, fontSize = 13.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("←", color = p.gold)
+                }
+            }
             if (t.isNotEmpty() && vids.isEmpty() && sers.isEmpty() && scis.isEmpty()) {
                 item {
-                    Column(Modifier.fillMaxWidth().padding(36.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(Icons.Filled.SearchOff, null, tint = p.muted, modifier = Modifier.size(34.dp))
-                        Text("لا نتائج لـ«$t»", color = p.muted, modifier = Modifier.padding(top = 8.dp))
+                        Text("لا عناوين تطابق «$t»", color = p.muted, modifier = Modifier.padding(top = 8.dp))
                     }
                 }
             }
             if (scis.isNotEmpty()) {
-                item { SectionTitle(p, "العلوم") }
+                item { SectionTitle(p, "المشايخ") }
                 itemsIndexed(scis) { _, s ->
                     ListItem(
                         headlineContent = { Text(s.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -589,7 +704,16 @@ fun SearchSheet(p: Pal, onLesson: (String) -> Unit, onSeries: (String) -> Unit, 
                 itemsIndexed(vids) { _, v ->
                     ListItem(
                         headlineContent = { Text(v.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        supportingContent = { Text(fmtDur(v.duration), color = p.gold) },
+                        supportingContent = {
+                            val sub = buildString {
+                                if (v.duration > 0) append(fmtDur(v.duration))
+                                if (v.has.contains("align")) {
+                                    if (isNotEmpty()) append(" · ")
+                                    append("محاذاة حية")
+                                }
+                            }
+                            Text(sub, color = p.gold)
+                        },
                         leadingContent = { Icon(Icons.Filled.PlayArrow, null, tint = p.muted) },
                         modifier = Modifier
                             .padding(vertical = 2.dp)
