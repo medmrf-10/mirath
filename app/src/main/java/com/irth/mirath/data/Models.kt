@@ -158,17 +158,29 @@ fun parseAlign(el: JsonElement): List<AWord> {
     }
 }
 
-/** تجميع الكلمات في جُمَل — عند علامات الترقيم أو سكتة > 0.85ث أو 12 كلمة. */
+/** تجميع الكلمات في عبارات قصيرة متوازنة — عند علامات الترقيم أو سكتة > 0.55ث أو 7 كلمات / 42 حرفاً. */
 fun buildPhrases(ws: List<AWord>): List<List<AWord>> {
     val pbrk = Regex("[،؛.!؟:…—]$")
     val ph = mutableListOf<MutableList<AWord>>()
     var cur = mutableListOf<AWord>()
+    var curChars = 0
     var prevE = -1.0
     for (w in ws) {
         val gap = if (prevE >= 0) w.s - prevE else 0.0
-        if (cur.isNotEmpty() && (gap > 0.85 || cur.size >= 12)) { ph.add(cur); cur = mutableListOf() }
-        cur.add(w); prevE = w.e
-        if (pbrk.containsMatchIn(w.w) && cur.size >= 3) { ph.add(cur); cur = mutableListOf() }
+        val nextChars = curChars + w.w.length + 1
+        if (cur.isNotEmpty() && (gap > 0.55 || cur.size >= 7 || (cur.size >= 4 && nextChars > 42))) {
+            ph.add(cur)
+            cur = mutableListOf()
+            curChars = 0
+        }
+        cur.add(w)
+        curChars += w.w.length + 1
+        prevE = w.e
+        if (pbrk.containsMatchIn(w.w) && cur.size >= 2) {
+            ph.add(cur)
+            cur = mutableListOf()
+            curChars = 0
+        }
     }
     if (cur.isNotEmpty()) ph.add(cur)
     return ph

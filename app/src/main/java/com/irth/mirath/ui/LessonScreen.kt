@@ -214,13 +214,13 @@ fun LessonScreen(
 
         when (mode) {
             "live" -> BoxWithConstraints(
-                Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp),
+                Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 6.dp),
             ) {
-                val maxVideoHeight = maxHeight * 0.35f
+                val maxVideoHeight = maxHeight * 0.28f
                 val totalDur = if (G.dur > 0) G.dur else dur
                 Column(
                     Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     // 1) عنوان الدرس ومعلومات الشيخ في سطر ثابت أعلى المشغل
                     Column(Modifier.fillMaxWidth()) {
@@ -244,7 +244,7 @@ fun LessonScreen(
                         }
                     }
 
-                    // 2) سطح الفيديو بارتفاع مضبوط لا يزاحم بقية الشاشة
+                    // 2) سطح الفيديو بارتفاع مضبوط لا يزاحم مسرح العبارات
                     Box(
                         Modifier.fillMaxWidth().heightIn(max = maxVideoHeight),
                         contentAlignment = Alignment.Center,
@@ -258,7 +258,7 @@ fun LessonScreen(
                             Slider(
                                 value = (pos / totalDur).toFloat().coerceIn(0f, 1f),
                                 onValueChange = { ctl.seek(it.toDouble() * totalDur) },
-                                modifier = Modifier.fillMaxWidth().height(26.dp),
+                                modifier = Modifier.fillMaxWidth().height(22.dp),
                                 colors = SliderDefaults.colors(
                                     thumbColor = p.gold,
                                     activeTrackColor = p.gold,
@@ -275,18 +275,18 @@ fun LessonScreen(
                         }
                     }
 
-                    // 4) المسرح الحي الثابت — يعرض الجملة الحالية فقط بتركيز هادئ وبدون سكرول
-                    Box(
+                    // 4) المسرح الحي الثابت — يقيس ارتفاعه الفعلي ويضبط حجم الخط تلقائياً لمنع اقتطاع أي عبارة
+                    BoxWithConstraints(
                         Modifier
                             .fillMaxWidth()
                             .weight(1f)
                             .clip(RoundedCornerShape(18.dp))
                             .background(p.card)
                             .border(1.dp, p.line, RoundedCornerShape(18.dp))
-                            .clipToBounds()
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
                         contentAlignment = Alignment.Center,
                     ) {
+                        val stageH = maxHeight.value
                         when {
                             noAlign -> {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -308,15 +308,18 @@ fun LessonScreen(
                                 val pi = curPh.coerceIn(0, phrases.lastIndex)
                                 val ph = phrases[pi]
                                 val charLen = ph.sumOf { it.w.length + 1 }
-                                val baseSp = when {
-                                    charLen > 120 -> 20f
-                                    charLen > 85 -> 22f
-                                    else -> 25f
-                                } * Prefs.fontScale.value
+                                val heightScale = (stageH / 155f).coerceIn(0.74f, 1.06f)
+                                val rawSp = when {
+                                    charLen > 52 || ph.size > 7 -> 17.5f
+                                    charLen > 38 || ph.size > 5 -> 19.5f
+                                    charLen > 25 -> 21.5f
+                                    else -> 23.5f
+                                }
+                                val baseSp = (rawSp * heightScale * Prefs.fontScale.value).coerceIn(14f, 26f)
                                 FlowRow(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.Center,
-                                    verticalArrangement = Arrangement.Center,
+                                    verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically),
                                 ) {
                                     ph.forEachIndexed { k, w ->
                                         val st = wordStyle(p, w, ph, pos, k)
@@ -326,7 +329,8 @@ fun LessonScreen(
                                             style = MaterialTheme.typography.headlineSmall.copy(
                                                 fontFamily = Amiri,
                                                 fontSize = baseSp.sp,
-                                                lineHeight = (baseSp * 1.55f).sp,
+                                                lineHeight = (baseSp * 1.28f).sp,
+                                                platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false),
                                                 fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
                                             ),
                                             color = st.first,
@@ -350,7 +354,7 @@ fun LessonScreen(
                             .clip(RoundedCornerShape(16.dp))
                             .background(p.card)
                             .border(1.dp, p.line, RoundedCornerShape(16.dp))
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
                     ) {
                         Row(
                             Modifier.fillMaxWidth(),
