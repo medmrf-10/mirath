@@ -164,6 +164,8 @@ loadApi();
                 .replace("Version/4.0 ", "")
             setBackgroundColor(android.graphics.Color.BLACK)
             webChromeClient = object : android.webkit.WebChromeClient() {
+                override fun getDefaultVideoPoster(): android.graphics.Bitmap =
+                    android.graphics.Bitmap.createBitmap(1, 1, android.graphics.Bitmap.Config.ARGB_8888)
                 override fun onConsoleMessage(cm: android.webkit.ConsoleMessage?): Boolean {
                     android.util.Log.d("MirathYT", "${cm?.message()} @${cm?.lineNumber()}")
                     return true

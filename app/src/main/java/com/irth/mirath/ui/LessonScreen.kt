@@ -11,10 +11,13 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -97,6 +100,7 @@ fun LessonScreen(
     p: Pal,
     videoId: String,
     at: Int = -1,
+    onBack: () -> Unit = {},
     onLesson: (String) -> Unit = {},
     onFollow: (String) -> Unit = onLesson,
 ) {
@@ -106,6 +110,7 @@ fun LessonScreen(
     val ctx = LocalContext.current
 
     var mode by remember { mutableStateOf("live") }
+    var showVideo by remember { mutableStateOf(true) }
     var quizOn by remember { mutableStateOf(false) }
     var words by remember(videoId) { mutableStateOf<List<AWord>?>(null) }
     var phrases by remember(videoId) { mutableStateOf<List<List<AWord>>>(emptyList()) }
@@ -140,7 +145,6 @@ fun LessonScreen(
     }
     LaunchedEffect(videoId, at) {
         Prefs.markOpened(videoId)
-        // ضمان جلب فهرس السلسلة أولاً حتى لا يكون معرف يوتيوب فارغاً أبداً
         if (videoId.startsWith("H:") && videoId.contains(":")) {
             val sid = videoId.substringBeforeLast(":")
             Haw.ensure(sid)
@@ -172,16 +176,13 @@ fun LessonScreen(
         if (curV.has.contains("summary")) summary = Repo.summary(videoId)
         if (curV.has.contains("questions")) questions = Repo.questions(videoId)
     }
-    // الشاشة تتبع المحرك: إن انتقل للتالي (نهاية/إشعار/سماعة) تنتقل معه
     LaunchedEffect(G.videoId, claimed) {
         val g = G.videoId
         if (claimed && g != null && g != videoId) onFollow(g)
     }
-    // نبض دقيقة لعدّاد مؤقت النوم
     var sleepTick by remember { mutableStateOf(0) }
     LaunchedEffect(G.sleepAt) { while (G.sleepAt > 0) { delay(20_000); sleepTick++ } }
 
-    // تحديث الجملة الجارية باستمرار عبر البحث الثنائي
     LaunchedEffect(pos, phrases) {
         if (phrases.isNotEmpty()) {
             val pi = findPhraseIndex(phrases, pos)
@@ -189,101 +190,125 @@ fun LessonScreen(
         }
     }
 
-    Column(Modifier.fillMaxSize()) {
-        // شريط الأوضاع
+    val who = v.speakers.joinToString("، ") { Repo.personName(it) }
+    val sub = listOf(who, ser?.title ?: "").filter { it.isNotEmpty() }.joinToString(" · ")
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .statusBarsPadding()
+            .navigationBarsPadding(),
+    ) {
+        // 1) ترويسة مدمجة رشيقة تجمع الرجوع + عنوان الدرس والشيخ + قائمة الدروس والبحث (توفير ~95dp)
         Row(
-            Modifier.fillMaxWidth().height(48.dp).background(p.card).border(1.dp, p.line),
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            MTab(p, Icons.Outlined.Visibility, "حية", mode == "live") { mode = "live" }
-            if (v.has.contains("transcript")) MTab(p, Icons.Outlined.MenuBook, "تفريغ", mode == "read") { mode = "read" }
-            if (v.has.contains("questions")) MTab(p, Icons.Outlined.Quiz, "أسئلة", mode == "qu") { mode = "qu" }
-            if (v.has.contains("summary")) MTab(p, Icons.Outlined.ShortText, "ملخص", mode == "sum") { mode = "sum" }
+            IconButton(onClick = onBack, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "رجوع", tint = p.muted, modifier = Modifier.size(20.dp))
+            }
+            Column(Modifier.weight(1f).padding(horizontal = 4.dp)) {
+                Text(
+                    v.title,
+                    color = p.text,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (sub.isNotEmpty()) {
+                    Text(
+                        sub,
+                        color = p.gold,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            if (v.has.contains("align") || v.has.contains("transcript")) {
+                IconButton(
+                    onClick = { mode = if (mode == "find") "live" else "find" },
+                    modifier = Modifier.size(34.dp),
+                ) {
+                    Icon(
+                        Icons.Outlined.Search,
+                        contentDescription = "بحث في الدرس",
+                        tint = if (mode == "find") p.gold else p.muted,
+                        modifier = Modifier.size(19.dp),
+                    )
+                }
+            }
+            IconButton(
+                onClick = { showDrawer = true },
+                modifier = Modifier.size(34.dp),
+            ) {
+                Icon(
+                    Icons.Outlined.FormatListBulleted,
+                    contentDescription = "قائمة الدروس",
+                    tint = p.muted,
+                    modifier = Modifier.size(19.dp),
+                )
+            }
+        }
+
+        // 2) شريط تبديل الأوضاع الخفيف (Pills بلا إطار ثقيل)
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ModePill(p, "حية", mode == "live") { mode = "live" }
+            if (v.has.contains("transcript") || phrases.isNotEmpty()) {
+                ModePill(p, "تفريغ", mode == "read") { mode = "read" }
+            }
+            if (v.has.contains("questions")) {
+                ModePill(p, "أسئلة", mode == "qu") { mode = "qu" }
+            }
+            if (v.has.contains("summary")) {
+                ModePill(p, "ملخص", mode == "sum") { mode = "sum" }
+            }
+            Spacer(Modifier.weight(1f))
+            if (mode == "live") {
+                ModePill(p, if (showVideo) "إخفاء الفيديو" else "إظهار الفيديو", !showVideo) {
+                    showVideo = !showVideo
+                }
+            }
             if (v.yt.isNotEmpty()) {
-                MTab(p, Icons.Outlined.PlayCircle, "يوتيوب", false) {
+                ModePill(p, "يوتيوب ↗", false) {
                     ctx.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://youtu.be/${v.yt}")))
                 }
             }
-            MTab(p, Icons.Outlined.FormatListBulleted, "الدروس", false) { showDrawer = true }
-            if (v.has.contains("align") || v.has.contains("transcript"))
-                MTab(p, Icons.Outlined.Search, "بحث", mode == "find") { mode = "find" }
         }
-        if (mode != "live") {
+
+        if (mode != "live" || !showVideo) {
             Box(Modifier.size(1.dp).alpha(0f)) { GSurface(G.local, p) }
         }
 
         when (mode) {
-            "live" -> BoxWithConstraints(
-                Modifier.fillMaxSize().padding(horizontal = 14.dp, vertical = 6.dp),
-            ) {
-                val maxVideoHeight = maxHeight * 0.28f
+            "live" -> {
                 val totalDur = if (G.dur > 0) G.dur else dur
                 Column(
-                    Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 14.dp),
                 ) {
-                    // 1) عنوان الدرس ومعلومات الشيخ في سطر ثابت أعلى المشغل
-                    Column(Modifier.fillMaxWidth()) {
-                        Text(
-                            v.title,
-                            color = p.text,
-                            style = MaterialTheme.typography.titleMedium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        val who = v.speakers.joinToString("، ") { Repo.personName(it) }
-                        val sub = listOf(who, ser?.title ?: "").filter { it.isNotEmpty() }.joinToString(" · ")
-                        if (sub.isNotEmpty()) {
-                            Text(
-                                sub,
-                                color = p.gold,
-                                style = MaterialTheme.typography.labelSmall,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-
-                    // 2) سطح الفيديو بارتفاع مضبوط لا يزاحم مسرح العبارات
-                    Box(
-                        Modifier.fillMaxWidth().heightIn(max = maxVideoHeight),
-                        contentAlignment = Alignment.Center,
-                    ) {
+                    // 3) الفيديو بأبعاد 16:9 نظيفة بدون هوامش سوداء جانبية (مع إمكانية طيه بنقرة)
+                    if (showVideo) {
+                        Spacer(Modifier.height(4.dp))
                         GSurface(G.local, p)
                     }
 
-                    // 3) شريط التقدم المدمج
-                    if (totalDur > 0) {
-                        Column(Modifier.fillMaxWidth()) {
-                            Slider(
-                                value = (pos / totalDur).toFloat().coerceIn(0f, 1f),
-                                onValueChange = { ctl.seek(it.toDouble() * totalDur) },
-                                modifier = Modifier.fillMaxWidth().height(22.dp),
-                                colors = SliderDefaults.colors(
-                                    thumbColor = p.gold,
-                                    activeTrackColor = p.gold,
-                                    inactiveTrackColor = p.soft,
-                                ),
-                            )
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text(fmtDur(pos.toInt()), color = p.muted, fontSize = 11.sp)
-                                if (phrases.isNotEmpty()) {
-                                    Text("${curPh + 1} / ${phrases.size}", color = p.muted, fontSize = 11.sp)
-                                }
-                                Text(fmtDur(totalDur.toInt()), color = p.muted, fontSize = 11.sp)
-                            }
-                        }
-                    }
-
-                    // 4) المسرح الحي الثابت — يقيس ارتفاعه الفعلي ويضبط حجم الخط تلقائياً لمنع اقتطاع أي عبارة
+                    // 4) المسرح الحي المفتوح (Weight 1f) — بلا قفص ولا إطار، يأخذ كامل المساحة الرحبة في الشاشة
                     BoxWithConstraints(
                         Modifier
                             .fillMaxWidth()
                             .weight(1f)
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(p.card)
-                            .border(1.dp, p.line, RoundedCornerShape(18.dp))
-                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                            .padding(horizontal = 6.dp, vertical = 6.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         val stageH = maxHeight.value
@@ -307,39 +332,95 @@ fun LessonScreen(
                             else -> {
                                 val pi = curPh.coerceIn(0, phrases.lastIndex)
                                 val ph = phrases[pi]
+                                val prevPh = if (pi > 0) phrases[pi - 1] else null
+                                val nextPh = if (pi < phrases.lastIndex) phrases[pi + 1] else null
                                 val charLen = ph.sumOf { it.w.length + 1 }
-                                val heightScale = (stageH / 155f).coerceIn(0.74f, 1.06f)
+                                val heightScale = (stageH / 240f).coerceIn(0.82f, 1.18f)
                                 val rawSp = when {
-                                    charLen > 52 || ph.size > 7 -> 17.5f
-                                    charLen > 38 || ph.size > 5 -> 19.5f
-                                    charLen > 25 -> 21.5f
-                                    else -> 23.5f
+                                    charLen > 52 || ph.size > 7 -> 20.5f
+                                    charLen > 38 || ph.size > 5 -> 22.5f
+                                    charLen > 25 -> 24.5f
+                                    else -> 26.5f
                                 }
-                                val baseSp = (rawSp * heightScale * Prefs.fontScale.value).coerceIn(14f, 26f)
-                                FlowRow(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically),
+                                val baseSp = (rawSp * heightScale * Prefs.fontScale.value).coerceIn(16f, 34f)
+                                val stageScroll = rememberScrollState()
+                                LaunchedEffect(pi) { stageScroll.scrollTo(0) }
+
+                                Column(
+                                    Modifier
+                                        .fillMaxSize()
+                                        .verticalScroll(stageScroll),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.SpaceEvenly,
                                 ) {
-                                    ph.forEachIndexed { k, w ->
-                                        val st = wordStyle(p, w, ph, pos, k)
-                                        val isCurrent = st.first == p.gold && st.second >= 0.9f
+                                    // العبارة السابقة خافتة في الأعلى (عند توفر مساحة كافية)
+                                    if (stageH >= 200f) {
                                         Text(
-                                            w.w,
-                                            style = MaterialTheme.typography.headlineSmall.copy(
-                                                fontFamily = Amiri,
-                                                fontSize = baseSp.sp,
-                                                lineHeight = (baseSp * 1.28f).sp,
-                                                platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false),
-                                                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
-                                            ),
-                                            color = st.first,
+                                            prevPh?.joinToString(" ") { it.w } ?: " ",
+                                            color = p.muted,
+                                            fontFamily = Amiri,
+                                            fontSize = (baseSp * 0.64f).coerceIn(13f, 18f).sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            textAlign = TextAlign.Center,
                                             modifier = Modifier
-                                                .alpha(st.second)
-                                                .clip(RoundedCornerShape(6.dp))
-                                                .background(if (isCurrent) p.gold.copy(alpha = 0.14f) else Color.Transparent)
-                                                .clickable { ctl.seek((w.s - 0.05).coerceAtLeast(0.0)) }
-                                                .padding(horizontal = 3.dp, vertical = 1.dp),
+                                                .fillMaxWidth()
+                                                .alpha(if (prevPh != null) 0.34f else 0f)
+                                                .clickable(enabled = prevPh != null) {
+                                                    prevPh?.firstOrNull()?.let { ctl.seek((it.s - 0.05).coerceAtLeast(0.0)) }
+                                                }
+                                                .padding(horizontal = 8.dp),
+                                        )
+                                    }
+
+                                    // العبارة الحالية — كاملة 100% دائماً في قلب المسرح المفتوح
+                                    FlowRow(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 4.dp, vertical = 4.dp),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically),
+                                    ) {
+                                        ph.forEachIndexed { k, w ->
+                                            val st = wordStyle(p, w, ph, pos, k)
+                                            val isCurrent = st.first == p.gold && st.second >= 0.9f
+                                            Text(
+                                                w.w,
+                                                style = MaterialTheme.typography.headlineSmall.copy(
+                                                    fontFamily = Amiri,
+                                                    fontSize = baseSp.sp,
+                                                    lineHeight = (baseSp * 1.38f).sp,
+                                                    platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false),
+                                                    fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                                                ),
+                                                color = st.first,
+                                                modifier = Modifier
+                                                    .alpha(st.second)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(if (isCurrent) p.gold.copy(alpha = 0.16f) else Color.Transparent)
+                                                    .clickable { ctl.seek((w.s - 0.05).coerceAtLeast(0.0)) }
+                                                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                                            )
+                                        }
+                                    }
+
+                                    // العبارة التالية خافتة في الأسفل للاستشراف البصري
+                                    if (stageH >= 200f) {
+                                        Text(
+                                            nextPh?.joinToString(" ") { it.w } ?: " ",
+                                            color = p.muted,
+                                            fontFamily = Amiri,
+                                            fontSize = (baseSp * 0.64f).coerceIn(13f, 18f).sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            textAlign = TextAlign.Center,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .alpha(if (nextPh != null) 0.34f else 0f)
+                                                .clickable(enabled = nextPh != null) {
+                                                    nextPh?.firstOrNull()?.let { ctl.seek((it.s - 0.05).coerceAtLeast(0.0)) }
+                                                }
+                                                .padding(horizontal = 8.dp),
                                         )
                                     }
                                 }
@@ -347,17 +428,39 @@ fun LessonScreen(
                         }
                     }
 
-                    // 5) شريط التحكم السفلي الثابت
+                    // 5) منطقة التحكم السفلية الموحدة (شريط التقدم المدمج + أزرار التشغيل بدون بطاقة ثقيلة)
                     Column(
                         Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(p.card)
-                            .border(1.dp, p.line, RoundedCornerShape(16.dp))
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                            .padding(bottom = 6.dp),
                     ) {
+                        if (totalDur > 0) {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(fmtDur(pos.toInt()), color = p.muted, fontSize = 11.sp)
+                                Slider(
+                                    value = (pos / totalDur).toFloat().coerceIn(0f, 1f),
+                                    onValueChange = { ctl.seek(it.toDouble() * totalDur) },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(24.dp)
+                                        .padding(horizontal = 6.dp),
+                                    colors = SliderDefaults.colors(
+                                        thumbColor = p.gold,
+                                        activeTrackColor = p.gold,
+                                        inactiveTrackColor = p.soft,
+                                    ),
+                                )
+                                Text(fmtDur(totalDur.toInt()), color = p.muted, fontSize = 11.sp)
+                            }
+                        }
+
                         Row(
-                            Modifier.fillMaxWidth(),
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(top = 2.dp),
                             horizontalArrangement = Arrangement.Center,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -368,12 +471,12 @@ fun LessonScreen(
                             ) {
                                 Icon(Icons.Filled.SkipPrevious, "السابق", tint = if (G.prevId != null || pos > 5.0) p.text else p.muted.copy(alpha = 0.4f))
                             }
-                            Spacer(Modifier.width(6.dp))
+                            Spacer(Modifier.width(8.dp))
                             ChipBtn(p, "‹ 15ث", false) { ctl.seek((pos - 15.0).coerceAtLeast(0.0)) }
-                            Spacer(Modifier.width(12.dp))
+                            Spacer(Modifier.width(14.dp))
                             Box(
                                 Modifier
-                                    .size(48.dp)
+                                    .size(50.dp)
                                     .clip(CircleShape)
                                     .background(p.primary)
                                     .clickable { if (playing) ctl.pause() else ctl.play() },
@@ -383,12 +486,12 @@ fun LessonScreen(
                                     if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                                     "تشغيل/إيقاف",
                                     tint = p.card,
-                                    modifier = Modifier.size(26.dp),
+                                    modifier = Modifier.size(28.dp),
                                 )
                             }
-                            Spacer(Modifier.width(12.dp))
+                            Spacer(Modifier.width(14.dp))
                             ChipBtn(p, "15ث ›", false) { ctl.seek(pos + 15.0) }
-                            Spacer(Modifier.width(6.dp))
+                            Spacer(Modifier.width(8.dp))
                             IconButton(
                                 onClick = { G.skipNext() },
                                 enabled = G.nextId != null,
@@ -397,8 +500,11 @@ fun LessonScreen(
                                 Icon(Icons.Filled.SkipNext, "التالي", tint = if (G.nextId != null) p.text else p.muted.copy(alpha = 0.4f))
                             }
                         }
+
                         Row(
-                            Modifier.fillMaxWidth().padding(top = 6.dp),
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp),
                             horizontalArrangement = Arrangement.Center,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -887,6 +993,25 @@ private fun IconBtn(p: Pal, ic: ImageVector, on: Boolean, click: () -> Unit) {
             .clickable(onClick = click),
         contentAlignment = Alignment.Center,
     ) { Icon(ic, null, tint = if (on) p.gold else p.muted, modifier = Modifier.size(16.dp)) }
+}
+
+@Composable
+private fun ModePill(p: Pal, label: String, on: Boolean, click: () -> Unit) {
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(if (on) p.gold.copy(alpha = 0.16f) else Color.Transparent)
+            .border(1.dp, if (on) p.gold else p.line, RoundedCornerShape(999.dp))
+            .clickable(onClick = click)
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+    ) {
+        Text(
+            label,
+            color = if (on) p.gold else p.muted,
+            fontSize = 12.sp,
+            fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
+        )
+    }
 }
 
 @Composable

@@ -117,23 +117,24 @@ fun MirathApp() {
                 modifier = Modifier.fillMaxSize(),
                 containerColor = p.bg,
                 topBar = {
-                    val title = when {
-                        route.contains("LessonR") -> "ميراث"
-                        route.contains("SeriesR") -> Repo.seriesOf(backEntry?.arguments?.getString("id") ?: "")?.title ?: "ميراث"
-                        route.contains("ScienceR") -> Repo.sciences?.firstOrNull { it.id == (backEntry?.arguments?.getString("id") ?: "") }?.name ?: "ميراث"
-                        route.contains("Fav") -> "المفضلة"
-                        route.contains("Stats") -> "إحصائي"
-                        route.contains("Today") -> "يومك"
-                        else -> "ميراث"
+                    if (!route.contains("LessonR")) {
+                        val title = when {
+                            route.contains("SeriesR") -> Repo.seriesOf(backEntry?.arguments?.getString("id") ?: "")?.title ?: "ميراث"
+                            route.contains("ScienceR") -> Repo.sciences?.firstOrNull { it.id == (backEntry?.arguments?.getString("id") ?: "") }?.name ?: "ميراث"
+                            route.contains("Fav") -> "المفضلة"
+                            route.contains("Stats") -> "إحصائي"
+                            route.contains("Today") -> "يومك"
+                            else -> "ميراث"
+                        }
+                        TopGlassBar(
+                            p, title,
+                            onTheme = { showTheme = true },
+                            onSearch = { showSearch = true },
+                            onBack = if (route.contains("ScienceR") || route.contains("SeriesR") || route.contains("RoadmapR") || route.contains("ExamR")) {
+                                { nav.popBackStack() }
+                            } else null,
+                        )
                     }
-                    TopGlassBar(
-                        p, title,
-                        onTheme = { showTheme = true },
-                        onSearch = { showSearch = true },
-                        onBack = if (route.contains("ScienceR") || route.contains("SeriesR") || route.contains("LessonR") || route.contains("RoadmapR") || route.contains("ExamR")) {
-                            { nav.popBackStack() }
-                        } else null,
-                    )
                 },
                 bottomBar = {
                     Column {
@@ -187,16 +188,18 @@ fun MirathApp() {
                                 }
                             }
                         }
-                        NavigationBar(containerColor = p.bg, contentColor = p.muted) {
-                            NavItem(p, route.contains("Today") || route.isEmpty(), "اليوم", Icons.Filled.DateRange) {
-                                if (booted) runCatching { nav.navigate(Today) { popUpTo(Today) { inclusive = true } } }
+                        if (!route.contains("LessonR")) {
+                            NavigationBar(containerColor = p.bg, contentColor = p.muted) {
+                                NavItem(p, route.contains("Today") || route.isEmpty(), "اليوم", Icons.Filled.DateRange) {
+                                    if (booted) runCatching { nav.navigate(Today) { popUpTo(Today) { inclusive = true } } }
+                                }
+                                NavItem(p, route.contains("Home"), "المكتبة", Icons.Filled.Home) {
+                                    if (booted) runCatching { nav.navigate(Home) { popUpTo(Today) } }
+                                }
+                                NavItem(p, route.contains("Fav"), "المفضلة", Icons.Filled.Favorite) { if (booted) runCatching { nav.navigate(Fav) } }
+                                NavItem(p, route.contains("Lib"), "مكتبتي", Icons.Filled.Folder) { if (booted) runCatching { nav.navigate(Lib) } }
+                                NavItem(p, route.contains("Stats"), "إحصائي", Icons.Filled.BarChart) { if (booted) runCatching { nav.navigate(Stats) } }
                             }
-                            NavItem(p, route.contains("Home"), "المكتبة", Icons.Filled.Home) {
-                                if (booted) runCatching { nav.navigate(Home) { popUpTo(Today) } }
-                            }
-                            NavItem(p, route.contains("Fav"), "المفضلة", Icons.Filled.Favorite) { if (booted) runCatching { nav.navigate(Fav) } }
-                            NavItem(p, route.contains("Lib"), "مكتبتي", Icons.Filled.Folder) { if (booted) runCatching { nav.navigate(Lib) } }
-                            NavItem(p, route.contains("Stats"), "إحصائي", Icons.Filled.BarChart) { if (booted) runCatching { nav.navigate(Stats) } }
                         }
                     }
                 },
@@ -247,6 +250,7 @@ fun MirathApp() {
                             val r = e.toRoute<LessonR>()
                             LessonScreen(
                                 p, r.id, r.at,
+                                onBack = { nav.popBackStack() },
                                 onLesson = { nav.navigate(LessonR(it)) { launchSingleTop = true } },
                                 onFollow = { nav.navigate(LessonR(it)) { popUpTo<LessonR> { inclusive = true } } },
                             )
