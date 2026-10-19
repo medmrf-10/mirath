@@ -1,15 +1,19 @@
 package com.irth.mirath.ui
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
@@ -19,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -30,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.irth.mirath.data.AWord
+import com.irth.mirath.data.Haw
 import com.irth.mirath.data.LocalLib
 import com.irth.mirath.data.QA
 import com.irth.mirath.data.Repo
@@ -49,6 +55,42 @@ private fun fmtT(sec: Double): String {
     return "%d:%02d".format(s / 60, s % 60)
 }
 
+/** تقسيم ذكي للتفريغ الطويل إلى N أجزاء متوازنة عند حدود الجمل والفقرات دون قطع الكلمات. */
+private fun splitTranscriptSmart(text: String, parts: Int): List<String> {
+    val clean = text.trim()
+    if (clean.isEmpty()) return emptyList()
+    if (parts <= 1) return listOf(clean)
+    val units = clean.split(Regex("(?<=[.!؟?\\n،؛])\\s+")).filter { it.isNotBlank() }
+    if (units.size <= parts) {
+        // احتياطي بالتقسيم على الكلمات إذا كان النص بلا علامات ترقيم كافية
+        val words = clean.split(Regex("\\s+")).filter { it.isNotBlank() }
+        if (words.isEmpty()) return listOf(clean)
+        val chunkSize = ((words.size + parts - 1) / parts).coerceAtLeast(1)
+        return words.chunked(chunkSize).map { it.joinToString(" ") }
+    }
+    val targetLen = (clean.length / parts).coerceAtLeast(1)
+    val out = mutableListOf<String>()
+    val sb = StringBuilder()
+    for (u in units) {
+        if (sb.isNotEmpty()) sb.append(' ')
+        sb.append(u.trim())
+        if (sb.length >= targetLen && out.size < parts - 1) {
+            out += sb.toString().trim()
+            sb.clear()
+        }
+    }
+    if (sb.isNotBlank()) out += sb.toString().trim()
+    return out
+}
+
+private fun copyPlainText(ctx: Context, label: String, text: String) {
+    runCatching {
+        val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        cm?.setPrimaryClip(ClipData.newPlainText(label, text))
+        Toast.makeText(ctx, "$label (${text.length} حرف)", Toast.LENGTH_SHORT).show()
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun LessonScreen(
@@ -58,6 +100,7 @@ fun LessonScreen(
     onLesson: (String) -> Unit = {},
     onFollow: (String) -> Unit = onLesson,
 ) {
+    Haw.rev.value
     val v = Repo.video(videoId)
     if (v == null) { EmptyBox(p, "الدرس غير موجود"); return }
     val ctx = LocalContext.current
@@ -78,12 +121,13 @@ fun LessonScreen(
     var claimed by remember(videoId) { mutableStateOf(false) }
     var showDrawer by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
-    var followRead by remember { mutableStateOf(true) }
+    var splitParts by remember(videoId) { mutableStateOf(1) }
+    val copiedParts = remember(videoId, splitParts) { mutableStateListOf<Int>() }
     var noteFor by remember { mutableStateOf<com.irth.mirath.store.Bookmark?>(null) }
     var noteTxt by remember { mutableStateOf("") }
     val ctl = G
-    val ser = remember(videoId) { Repo.seriesOfVideo(videoId) }
-    val media = remember(videoId, Prefs.srcRev.value) {
+    val ser = remember(videoId, Haw.rev.value) { Repo.seriesOfVideo(videoId) }
+    val media = remember(videoId, Prefs.srcRev.value, Haw.rev.value) {
         LocalLib.mediaFor(videoId)?.takeIf { v.yt.isEmpty() || Prefs.src(ser?.id ?: "") == "local" }
     }
 
@@ -96,26 +140,37 @@ fun LessonScreen(
     }
     LaunchedEffect(videoId, at) {
         Prefs.markOpened(videoId)
+        // ضمان جلب فهرس السلسلة أولاً حتى لا يكون معرف يوتيوب فارغاً أبداً
+        if (videoId.startsWith("H:") && videoId.contains(":")) {
+            val sid = videoId.substringBeforeLast(":")
+            Haw.ensure(sid)
+            if (Repo.video(videoId)?.yt.isNullOrEmpty()) {
+                Haw.ensure(sid, forceRefresh = true)
+            }
+        }
+        val curV = Repo.video(videoId) ?: v
+        if (curV.duration > 0 && dur <= 0.0) dur = curV.duration.toDouble()
+        val curMedia = LocalLib.mediaFor(videoId)?.takeIf { curV.yt.isEmpty() || Prefs.src(ser?.id ?: "") == "local" }
         val same = G.videoId == videoId
         if (!same) {
             if (at >= 0) {
-                G.play(ctx, videoId, v.title, v.yt, media, at) {}
+                G.play(ctx, videoId, curV.title, curV.yt, curMedia, at) {}
             } else if (!G.playLesson(ctx, videoId)) {
-                G.play(ctx, videoId, v.title, v.yt, media, Prefs.progress(videoId)) {}
+                G.play(ctx, videoId, curV.title, curV.yt, curMedia, Prefs.progress(videoId)) {}
             }
         } else if (at >= 0) {
             ctl.seek(at.toDouble())
         }
         claimed = true
-        if (v.has.contains("align")) {
+        if (curV.has.contains("align")) {
             runCatching {
                 val ws = Repo.align(videoId)
                 if (ws.isEmpty()) noAlign = true else { words = ws; phrases = buildPhrases(ws) }
             }.onFailure { noAlign = true }
         } else noAlign = true
-        if (v.has.contains("transcript")) transcript = Repo.transcript(videoId)
-        if (v.has.contains("summary")) summary = Repo.summary(videoId)
-        if (v.has.contains("questions")) questions = Repo.questions(videoId)
+        if (curV.has.contains("transcript")) transcript = Repo.transcript(videoId)
+        if (curV.has.contains("summary")) summary = Repo.summary(videoId)
+        if (curV.has.contains("questions")) questions = Repo.questions(videoId)
     }
     // الشاشة تتبع المحرك: إن انتقل للتالي (نهاية/إشعار/سماعة) تنتقل معه
     LaunchedEffect(G.videoId, claimed) {
@@ -155,37 +210,79 @@ fun LessonScreen(
         }
 
         when (mode) {
-            "live" -> LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-                item {
-                    Spacer(Modifier.height(10.dp))
-                    GSurface(G.local, p)
-                    // شريط التقدم — اسحب للقفز لأي موضع
-                    val totalDur = if (G.dur > 0) G.dur else dur
-                    if (totalDur > 0) {
-                        Slider(
-                            value = (pos / totalDur).toFloat().coerceIn(0f, 1f),
-                            onValueChange = { ctl.seek(it.toDouble() * totalDur) },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = SliderDefaults.colors(thumbColor = p.gold, activeTrackColor = p.gold, inactiveTrackColor = p.soft),
+            "live" -> BoxWithConstraints(
+                Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                val maxVideoHeight = maxHeight * 0.35f
+                val totalDur = if (G.dur > 0) G.dur else dur
+                Column(
+                    Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    // 1) عنوان الدرس ومعلومات الشيخ في سطر ثابت أعلى المشغل
+                    Column(Modifier.fillMaxWidth()) {
+                        Text(
+                            v.title,
+                            color = p.text,
+                            style = MaterialTheme.typography.titleMedium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(fmtDur(pos.toInt()), color = p.muted, fontSize = 11.sp)
-                            if (v.alignCoverage > 0) {
-                                Text("محاذاة ${v.alignCoverage.toInt()}%", color = p.gold.copy(alpha = 0.8f), fontSize = 11.sp)
-                            }
-                            Text(fmtDur(totalDur.toInt()), color = p.muted, fontSize = 11.sp)
+                        val who = v.speakers.joinToString("، ") { Repo.personName(it) }
+                        val sub = listOf(who, ser?.title ?: "").filter { it.isNotEmpty() }.joinToString(" · ")
+                        if (sub.isNotEmpty()) {
+                            Text(
+                                sub,
+                                color = p.gold,
+                                style = MaterialTheme.typography.labelSmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         }
                     }
-                    Spacer(Modifier.height(10.dp))
 
-                    // المسرح الحي ثلاثي السياق (الجملة السابقة + الجملة النشطة بالكشف الذهبي + الجملة التالية)
-                    Column(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(p.card)
+                    // 2) سطح الفيديو بارتفاع مضبوط لا يزاحم بقية الشاشة
+                    Box(
+                        Modifier.fillMaxWidth().heightIn(max = maxVideoHeight),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        GSurface(G.local, p)
+                    }
+
+                    // 3) شريط التقدم المدمج
+                    if (totalDur > 0) {
+                        Column(Modifier.fillMaxWidth()) {
+                            Slider(
+                                value = (pos / totalDur).toFloat().coerceIn(0f, 1f),
+                                onValueChange = { ctl.seek(it.toDouble() * totalDur) },
+                                modifier = Modifier.fillMaxWidth().height(26.dp),
+                                colors = SliderDefaults.colors(
+                                    thumbColor = p.gold,
+                                    activeTrackColor = p.gold,
+                                    inactiveTrackColor = p.soft,
+                                ),
+                            )
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text(fmtDur(pos.toInt()), color = p.muted, fontSize = 11.sp)
+                                if (phrases.isNotEmpty()) {
+                                    Text("${curPh + 1} / ${phrases.size}", color = p.muted, fontSize = 11.sp)
+                                }
+                                Text(fmtDur(totalDur.toInt()), color = p.muted, fontSize = 11.sp)
+                            }
+                        }
+                    }
+
+                    // 4) المسرح الحي الثابت — يعرض الجملة الحالية فقط بتركيز هادئ وبدون سكرول
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(p.card)
                             .border(1.dp, p.line, RoundedCornerShape(18.dp))
-                            .padding(horizontal = 18.dp, vertical = 18.dp)
-                            .heightIn(min = 168.dp),
-                        verticalArrangement = Arrangement.Center,
-                        horizontalAlignment = Alignment.CenterHorizontally,
+                            .clipToBounds()
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        contentAlignment = Alignment.Center,
                     ) {
                         when {
                             noAlign -> {
@@ -206,34 +303,15 @@ fun LessonScreen(
                             phrases.isEmpty() -> Text("يُحمّل المحاذاة الحية…", color = p.muted, fontSize = 14.sp)
                             else -> {
                                 val pi = curPh.coerceIn(0, phrases.lastIndex)
-                                val prevPh = phrases.getOrNull(pi - 1)
                                 val ph = phrases[pi]
-                                val nextPh = phrases.getOrNull(pi + 1)
-
-                                // السطر السابق (سياق خافت قابل للنقر للرجوع)
-                                if (prevPh != null) {
-                                    Text(
-                                        prevPh.joinToString(" ") { it.w },
-                                        style = MaterialTheme.typography.bodyMedium.copy(
-                                            fontFamily = Amiri,
-                                            fontSize = (18 * Prefs.fontScale.value).sp,
-                                            lineHeight = (28 * Prefs.fontScale.value).sp,
-                                        ),
-                                        color = p.muted,
-                                        textAlign = TextAlign.Center,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .alpha(0.45f)
-                                            .clickable { ctl.seek((prevPh.first().s - 0.05).coerceAtLeast(0.0)) }
-                                            .padding(bottom = 8.dp),
-                                    )
-                                }
-
-                                // الجملة الحالية (FlowRow يلتف بسلاسة مع تلوين الكلمة النشطة بالذهبي)
+                                val charLen = ph.sumOf { it.w.length + 1 }
+                                val baseSp = when {
+                                    charLen > 120 -> 20f
+                                    charLen > 85 -> 22f
+                                    else -> 25f
+                                } * Prefs.fontScale.value
                                 FlowRow(
-                                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.Center,
                                     verticalArrangement = Arrangement.Center,
                                 ) {
@@ -244,50 +322,32 @@ fun LessonScreen(
                                             w.w,
                                             style = MaterialTheme.typography.headlineSmall.copy(
                                                 fontFamily = Amiri,
-                                                fontSize = (26 * Prefs.fontScale.value).sp,
-                                                lineHeight = (42 * Prefs.fontScale.value).sp,
+                                                fontSize = baseSp.sp,
+                                                lineHeight = (baseSp * 1.55f).sp,
                                                 fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
                                             ),
                                             color = st.first,
                                             modifier = Modifier
                                                 .alpha(st.second)
                                                 .clip(RoundedCornerShape(6.dp))
-                                                .background(if (isCurrent) p.gold.copy(alpha = 0.12f) else Color.Transparent)
+                                                .background(if (isCurrent) p.gold.copy(alpha = 0.14f) else Color.Transparent)
                                                 .clickable { ctl.seek((w.s - 0.05).coerceAtLeast(0.0)) }
                                                 .padding(horizontal = 3.dp, vertical = 1.dp),
                                         )
                                     }
                                 }
-
-                                // السطر التالي (معاينة خافتة قابلة للنقر للقفز للأمام)
-                                if (nextPh != null) {
-                                    Text(
-                                        nextPh.joinToString(" ") { it.w },
-                                        style = MaterialTheme.typography.bodyMedium.copy(
-                                            fontFamily = Amiri,
-                                            fontSize = (18 * Prefs.fontScale.value).sp,
-                                            lineHeight = (28 * Prefs.fontScale.value).sp,
-                                        ),
-                                        color = p.muted,
-                                        textAlign = TextAlign.Center,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .alpha(0.42f)
-                                            .clickable { ctl.seek((nextPh.first().s - 0.05).coerceAtLeast(0.0)) }
-                                            .padding(top = 8.dp),
-                                    )
-                                }
                             }
                         }
                     }
-                    Spacer(Modifier.height(10.dp))
 
-                    // منطقة التحكم الكاملة (سابق / -15ث / تشغيل / +15ث / تالي)
+                    // 5) شريط التحكم السفلي الثابت
                     Column(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(p.card)
-                            .border(1.dp, p.line, RoundedCornerShape(16.dp)).padding(horizontal = 14.dp, vertical = 12.dp),
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(p.card)
+                            .border(1.dp, p.line, RoundedCornerShape(16.dp))
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
                     ) {
                         Row(
                             Modifier.fillMaxWidth(),
@@ -297,39 +357,44 @@ fun LessonScreen(
                             IconButton(
                                 onClick = { G.skipPrev() },
                                 enabled = G.prevId != null || pos > 5.0,
+                                modifier = Modifier.size(36.dp),
                             ) {
                                 Icon(Icons.Filled.SkipPrevious, "السابق", tint = if (G.prevId != null || pos > 5.0) p.text else p.muted.copy(alpha = 0.4f))
                             }
                             Spacer(Modifier.width(6.dp))
                             ChipBtn(p, "‹ 15ث", false) { ctl.seek((pos - 15.0).coerceAtLeast(0.0)) }
-                            Spacer(Modifier.width(14.dp))
+                            Spacer(Modifier.width(12.dp))
                             Box(
-                                Modifier.size(56.dp).clip(CircleShape).background(p.primary)
+                                Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(p.primary)
                                     .clickable { if (playing) ctl.pause() else ctl.play() },
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Icon(
                                     if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                                    "تشغيل/إيقاف", tint = p.card, modifier = Modifier.size(28.dp),
+                                    "تشغيل/إيقاف",
+                                    tint = p.card,
+                                    modifier = Modifier.size(26.dp),
                                 )
                             }
-                            Spacer(Modifier.width(14.dp))
+                            Spacer(Modifier.width(12.dp))
                             ChipBtn(p, "15ث ›", false) { ctl.seek(pos + 15.0) }
                             Spacer(Modifier.width(6.dp))
                             IconButton(
                                 onClick = { G.skipNext() },
                                 enabled = G.nextId != null,
+                                modifier = Modifier.size(36.dp),
                             ) {
                                 Icon(Icons.Filled.SkipNext, "التالي", tint = if (G.nextId != null) p.text else p.muted.copy(alpha = 0.4f))
                             }
                         }
                         Row(
-                            Modifier.fillMaxWidth().padding(top = 10.dp),
+                            Modifier.fillMaxWidth().padding(top = 6.dp),
+                            horizontalArrangement = Arrangement.Center,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text("${fmtT(pos)} / ${fmtT(totalDur)}", color = p.muted, fontSize = 12.sp)
-                            if (phrases.isNotEmpty()) Text(" · جملة ${curPh + 1}/${phrases.size}", color = p.muted, fontSize = 11.sp)
-                            Spacer(Modifier.weight(1f))
                             ChipBtn(p, "أ−", Prefs.fontScale.value > 0.8f) { Prefs.setFontScale((Prefs.fontScale.value - 0.1f).coerceAtLeast(0.7f)) }
                             ChipBtn(p, "أ+", Prefs.fontScale.value < 1.8f) { Prefs.setFontScale((Prefs.fontScale.value + 0.1f).coerceAtMost(2f)) }
                             IconBtn(p, Icons.Filled.Favorite, Prefs.isFav(videoId)) { Prefs.toggleFav(videoId) }
@@ -361,105 +426,197 @@ fun LessonScreen(
                             val sl = G.sleepLabel()
                             ChipBtn(p, sl ?: "نوم", sl != null) { G.cycleSleep() }
                         }
-                        Box(
-                            Modifier.fillMaxWidth().padding(top = 10.dp).height(3.dp)
-                                .clip(RoundedCornerShape(999.dp)).background(p.soft),
-                        ) {
-                            val f = if (totalDur > 0) (pos / totalDur).toFloat().coerceIn(0f, 1f) else 0f
-                            Box(Modifier.fillMaxWidth(f).fillMaxHeight().clip(RoundedCornerShape(999.dp)).background(p.gold))
-                        }
                     }
-                    // عنوان الدرس ومعلومات الشيخ والسلسلة
-                    Row(Modifier.padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(v.title, color = p.text, style = MaterialTheme.typography.titleLarge)
-                            val who = v.speakers.joinToString("، ") { Repo.personName(it) }
-                            val sub = listOf(who, ser?.title ?: "").filter { it.isNotEmpty() }.joinToString(" · ")
-                            if (sub.isNotEmpty()) Text(sub, color = p.gold, style = MaterialTheme.typography.labelMedium)
-                        }
-                    }
-                    Spacer(Modifier.height(40.dp))
                 }
             }
             "read" -> {
-                val readListState = rememberLazyListState()
-                LaunchedEffect(curPh, followRead, phrases.size) {
-                    if (followRead && phrases.isNotEmpty() && curPh in phrases.indices) {
-                        runCatching { readListState.animateScrollToItem((curPh - 1).coerceAtLeast(0)) }
-                    }
+                val rawText = remember(transcript, phrases) {
+                    val t = transcript?.trim().orEmpty()
+                    if (t.isNotEmpty()) t
+                    else if (phrases.isNotEmpty()) phrases.joinToString(" ") { ph -> ph.joinToString(" ") { it.w } }
+                    else ""
                 }
+                val chunks = remember(rawText, splitParts) {
+                    splitTranscriptSmart(rawText, splitParts)
+                }
+
                 Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 10.dp)) {
-                    Row(
-                        Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                    // شريط أدوات القراءة والتقسيم والنسخ
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(p.card)
+                            .border(1.dp, p.line, RoundedCornerShape(14.dp))
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
                     ) {
-                        ChipBtn(p, "أ−", Prefs.fontScale.value > 0.8f) { Prefs.setFontScale((Prefs.fontScale.value - 0.1f).coerceAtLeast(0.7f)) }
-                        Spacer(Modifier.width(4.dp))
-                        ChipBtn(p, "أ+", Prefs.fontScale.value < 1.8f) { Prefs.setFontScale((Prefs.fontScale.value + 0.1f).coerceAtMost(2f)) }
-                        Spacer(Modifier.weight(1f))
-                        if (phrases.isNotEmpty()) {
-                            ChipBtn(p, if (followRead) "متابعة الصوت ✓" else "متابعة الصوت", followRead) {
-                                followRead = !followRead
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            ChipBtn(p, "أ−", Prefs.fontScale.value > 0.8f) { Prefs.setFontScale((Prefs.fontScale.value - 0.1f).coerceAtLeast(0.7f)) }
+                            Spacer(Modifier.width(4.dp))
+                            ChipBtn(p, "أ+", Prefs.fontScale.value < 1.8f) { Prefs.setFontScale((Prefs.fontScale.value + 0.1f).coerceAtMost(2f)) }
+                            Spacer(Modifier.weight(1f))
+                            Text("تقسيم النسخ:", color = p.muted, fontSize = 12.sp)
+                            listOf(1 to "كامل", 3 to "3", 5 to "5", 10 to "10").forEach { (n, lbl) ->
+                                ChipBtn(p, lbl, splitParts == n) { splitParts = n }
                             }
                         }
-                    }
-                    if (phrases.isNotEmpty()) {
-                        LazyColumn(
-                            state = readListState,
-                            modifier = Modifier.fillMaxSize(),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            itemsIndexed(phrases) { idx, ph ->
-                                val active = idx == curPh
+
+                        if (rawText.isNotEmpty()) {
+                            Spacer(Modifier.height(8.dp))
+                            if (splitParts == 1) {
+                                val copiedAll = 0 in copiedParts
                                 Row(
-                                    Modifier.fillMaxWidth()
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(if (active) p.soft else p.card)
-                                        .border(1.dp, if (active) p.gold else p.line, RoundedCornerShape(12.dp))
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(if (copiedAll) p.gold.copy(alpha = 0.16f) else p.soft)
+                                        .border(1.dp, if (copiedAll) p.gold else p.line, RoundedCornerShape(10.dp))
                                         .clickable {
-                                            ctl.seek((ph.first().s - 0.05).coerceAtLeast(0.0))
+                                            copyPlainText(ctx, "تم نسخ التفريغ كاملاً", rawText)
+                                            if (0 !in copiedParts) copiedParts.add(0)
                                         }
-                                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                                    verticalAlignment = Alignment.Top,
+                                        .padding(horizontal = 14.dp, vertical = 9.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Text(
-                                        fmtT(ph.first().s),
-                                        color = if (active) p.gold else p.muted,
-                                        fontSize = 12.sp,
-                                        fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
-                                        modifier = Modifier.width(48.dp).padding(top = 4.dp),
+                                    Icon(
+                                        if (copiedAll) Icons.Filled.Check else Icons.Filled.ContentCopy,
+                                        contentDescription = null,
+                                        tint = p.gold,
+                                        modifier = Modifier.size(16.dp),
                                     )
+                                    Spacer(Modifier.width(8.dp))
                                     Text(
-                                        ph.joinToString(" ") { it.w },
-                                        color = if (active) p.gold else p.text,
-                                        style = MaterialTheme.typography.bodyLarge.copy(
-                                            fontFamily = Amiri,
-                                            fontSize = (19 * Prefs.fontScale.value).sp,
-                                            lineHeight = (34 * Prefs.fontScale.value).sp,
-                                        ),
-                                        modifier = Modifier.weight(1f),
+                                        if (copiedAll) "تم نسخ المقال كاملاً ✓ (${rawText.length} حرف)" else "نسخ المقال كاملاً (${rawText.length} حرف)",
+                                        color = if (copiedAll) p.gold else p.text,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
                                     )
                                 }
+                            } else {
+                                FlowRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    chunks.forEachIndexed { idx, partText ->
+                                        val isCopied = idx in copiedParts
+                                        val partLabel = "جزء ${idx + 1}/${chunks.size}"
+                                        Row(
+                                            Modifier
+                                                .clip(RoundedCornerShape(999.dp))
+                                                .background(if (isCopied) p.gold.copy(alpha = 0.16f) else p.soft)
+                                                .border(1.dp, if (isCopied) p.gold else p.line, RoundedCornerShape(999.dp))
+                                                .clickable {
+                                                    val header = "[${v.title} — $partLabel]\n\n"
+                                                    copyPlainText(ctx, "تم نسخ $partLabel", header + partText)
+                                                    if (idx !in copiedParts) copiedParts.add(idx)
+                                                }
+                                                .padding(horizontal = 11.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Icon(
+                                                if (isCopied) Icons.Filled.Check else Icons.Filled.ContentCopy,
+                                                contentDescription = null,
+                                                tint = if (isCopied) p.gold else p.muted,
+                                                modifier = Modifier.size(14.dp),
+                                            )
+                                            Spacer(Modifier.width(5.dp))
+                                            Text(
+                                                if (isCopied) "نسخ ${idx + 1}/${chunks.size} ✓" else "نسخ ${idx + 1}/${chunks.size}",
+                                                color = if (isCopied) p.gold else p.text,
+                                                fontSize = 12.sp,
+                                                fontWeight = if (isCopied) FontWeight.Bold else FontWeight.Normal,
+                                            )
+                                        }
+                                    }
+                                }
                             }
-                            item { Spacer(Modifier.height(40.dp)) }
                         }
+                    }
+
+                    Spacer(Modifier.height(10.dp))
+
+                    // عرض المقال المتصل النظيف بدون مؤقتات أو تقطيع عشوائي
+                    if (rawText.isEmpty() && transcript == null) {
+                        LoadingBox(p)
                     } else {
-                        LazyColumn(Modifier.fillMaxSize()) {
-                            item {
-                                val t = transcript
-                                if (t == null) LoadingBox(p)
-                                else Text(
-                                    t,
-                                    color = p.text,
-                                    style = MaterialTheme.typography.bodyLarge.copy(
-                                        fontFamily = Amiri,
-                                        fontSize = (18 * Prefs.fontScale.value).sp,
-                                        lineHeight = (34 * Prefs.fontScale.value).sp,
-                                    ),
-                                    textAlign = TextAlign.Justify,
-                                )
+                        SelectionContainer {
+                            LazyColumn(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(p.card)
+                                    .border(1.dp, p.line, RoundedCornerShape(16.dp))
+                                    .padding(horizontal = 18.dp, vertical = 14.dp),
+                                verticalArrangement = Arrangement.spacedBy(14.dp),
+                            ) {
+                                if (splitParts <= 1) {
+                                    item {
+                                        Text(
+                                            rawText,
+                                            color = p.text,
+                                            style = MaterialTheme.typography.bodyLarge.copy(
+                                                fontFamily = Amiri,
+                                                fontSize = (20 * Prefs.fontScale.value).sp,
+                                                lineHeight = (38 * Prefs.fontScale.value).sp,
+                                            ),
+                                            textAlign = TextAlign.Justify,
+                                        )
+                                    }
+                                } else {
+                                    itemsIndexed(chunks) { idx, partText ->
+                                        val isCopied = idx in copiedParts
+                                        Column(Modifier.fillMaxWidth()) {
+                                            Row(
+                                                Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(bottom = 6.dp)
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(p.soft)
+                                                    .clickable {
+                                                        val partLabel = "جزء ${idx + 1}/${chunks.size}"
+                                                        val header = "[${v.title} — $partLabel]\n\n"
+                                                        copyPlainText(ctx, "تم نسخ $partLabel", header + partText)
+                                                        if (idx !in copiedParts) copiedParts.add(idx)
+                                                    }
+                                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                            ) {
+                                                Text(
+                                                    "الجزء ${idx + 1} من ${chunks.size} (${partText.length} حرف)",
+                                                    color = p.gold,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.weight(1f),
+                                                )
+                                                Text(
+                                                    if (isCopied) "تم النسخ ✓" else "اضغط لنسخ هذا الجزء",
+                                                    color = if (isCopied) p.gold else p.muted,
+                                                    fontSize = 11.sp,
+                                                )
+                                            }
+                                            Text(
+                                                partText,
+                                                color = p.text,
+                                                style = MaterialTheme.typography.bodyLarge.copy(
+                                                    fontFamily = Amiri,
+                                                    fontSize = (20 * Prefs.fontScale.value).sp,
+                                                    lineHeight = (38 * Prefs.fontScale.value).sp,
+                                                ),
+                                                textAlign = TextAlign.Justify,
+                                            )
+                                            if (idx < chunks.lastIndex) {
+                                                HorizontalDivider(color = p.line, modifier = Modifier.padding(top = 12.dp))
+                                            }
+                                        }
+                                    }
+                                }
+                                item { Spacer(Modifier.height(32.dp)) }
                             }
-                            item { Spacer(Modifier.height(40.dp)) }
                         }
                     }
                 }
@@ -788,11 +945,22 @@ fun GSurface(local: Boolean, p: Pal) {
         AndroidView(
             factory = { ctx ->
                 android.widget.FrameLayout(ctx).apply {
-                    G.webView?.let { wv ->
+                    val wv = G.ensureWeb(ctx)
+                    if (wv.parent !== this) {
                         (wv.parent as? android.view.ViewGroup)?.removeView(wv)
                         addView(wv, android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT))
                     }
                 }
+            },
+            update = { frame ->
+                val wv = G.ensureWeb(frame.context)
+                if (wv.parent !== frame) {
+                    (wv.parent as? android.view.ViewGroup)?.removeView(wv)
+                    frame.addView(wv, android.view.ViewGroup.LayoutParams(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT))
+                }
+            },
+            onRelease = { frame ->
+                frame.removeAllViews()
             },
             modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(16.dp)).background(Color.Black),
         )

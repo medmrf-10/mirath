@@ -11,6 +11,7 @@ import android.webkit.WebView
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import java.io.File
 
 /**
@@ -50,24 +51,68 @@ object G {
     private var focusReq: AudioManager.OnAudioFocusChangeListener? = null
 
     private const val YT_PAGE = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
-<style>html,body{margin:0;background:#000;height:100%}#p{position:fixed;inset:0;width:100%;height:100%}</style></head>
+<style>html,body{margin:0;background:#000;height:100%;overflow:hidden}#p{position:fixed;inset:0;width:100%;height:100%;border:0}</style></head>
 <body><div id="p"></div><script>
-var pl;window.ct=0;window.ps=-1;
-function onYouTubeIframeAPIReady(){pl=new YT.Player('p',{playerVars:{rel:0,playsinline:1,enablejsapi:1},
-events:{onReady:function(){if(window.__pend){loadVid(window.__pend.id,window.__pend.st);window.__pend=null}},
-onStateChange:function(e){window.ps=e.data;}}});}
-window.loadVid=function(id,st){window.ct=st;window.ps=-1;try{pl.loadVideoById({videoId:id,startSeconds:st})}catch(e){}};
-setInterval(function(){try{if(pl&&pl.getCurrentTime)window.ct=pl.getCurrentTime()}catch(e){}},200);
-</script><script src="https://www.youtube.com/iframe_api"></script></body></html>"""
+var pl=null,rdy=false,retried={};window.ct=0;window.ps=-1;
+function loadApi(){
+  if(window.YT&&window.YT.Player)return;
+  var old=document.getElementById('yt-api');if(old)old.remove();
+  var s=document.createElement('script');s.id='yt-api';
+  s.src='https://www.youtube.com/iframe_api';
+  s.onerror=function(){setTimeout(loadApi,1800);};
+  document.body.appendChild(s);
+}
+window.loadVid=function(id,st){
+  if(!id)return;
+  var s=st||0;
+  window.__cur={id:id,st:s};
+  if(!rdy||!pl||typeof pl.loadVideoById!=='function'){
+    window.__pend={id:id,st:s};
+    loadApi();
+    return;
+  }
+  window.ct=s;window.ps=-1;
+  try{pl.loadVideoById({videoId:id,startSeconds:s});}catch(e){window.__pend={id:id,st:s};}
+};
+function onYouTubeIframeAPIReady(){
+  pl=new YT.Player('p',{
+    width:'100%',height:'100%',
+    playerVars:{rel:0,playsinline:1,enablejsapi:1,origin:'https://www.youtube.com'},
+    events:{
+      onReady:function(){
+        rdy=true;
+        if(window.__pend){var p=window.__pend;window.__pend=null;window.loadVid(p.id,p.st);}
+      },
+      onStateChange:function(e){window.ps=e.data;},
+      onError:function(e){
+        var c=window.__cur;
+        if(c&&c.id){
+          var n=(retried[c.id]||0)+1;retried[c.id]=n;
+          if(n<=2){
+            setTimeout(function(){
+              try{pl.loadVideoById({videoId:c.id,startSeconds:Math.floor(window.ct||c.st||0)});}catch(x){}
+            },600*n);
+          }
+        }
+      }
+    }
+  });
+}
+setInterval(function(){try{if(rdy&&pl&&pl.getCurrentTime)window.ct=pl.getCurrentTime()}catch(e){}},200);
+loadApi();
+</script></body></html>"""
 
-    private fun ensureWeb(ctx: Context) {
-        if (webView != null) return
-        webView = WebView(ctx).apply {
+    fun ensureWeb(ctx: Context): WebView {
+        webView?.let { return it }
+        val appCtx = ctx.applicationContext
+        return WebView(appCtx).apply {
             settings.javaScriptEnabled = true
             settings.mediaPlaybackRequiresUserGesture = false
             settings.domStorageEnabled = true
-            loadDataWithBaseURL("https://www.youtube-nocookie.com", YT_PAGE, "text/html", "utf-8", null)
-        }
+            settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
+            setBackgroundColor(android.graphics.Color.BLACK)
+            loadDataWithBaseURL("https://www.youtube.com", YT_PAGE, "text/html", "utf-8", null)
+        }.also { webView = it }
     }
 
     fun toggle() {
@@ -80,40 +125,40 @@ setInterval(function(){try{if(pl&&pl.getCurrentTime)window.ct=pl.getCurrentTime(
             val rewindTo = (pos - 2.0).coerceAtLeast(0.0)
             pos = rewindTo
             if (local) runCatching { mp?.seekTo((rewindTo * 1000).toInt()) }
-            else webView?.evaluateJavascript("try{pl&&pl.seekTo($rewindTo,true)}catch(e){}", null)
+            else webView?.evaluateJavascript("try{rdy&&pl&&pl.seekTo($rewindTo,true)}catch(e){}", null)
         }
         pausedAtMs = 0L
         if (local) runCatching { mp?.start() }
-        else webView?.evaluateJavascript("try{pl&&pl.playVideo()}catch(e){}", null)
+        else webView?.evaluateJavascript("try{rdy&&pl&&pl.playVideo()}catch(e){}", null)
     }
     fun pause() {
         pausedAtMs = System.currentTimeMillis()
         saveProgress()
         if (local) runCatching { mp?.pause() }
-        else webView?.evaluateJavascript("try{pl&&pl.pauseVideo()}catch(e){}", null)
+        else webView?.evaluateJavascript("try{rdy&&pl&&pl.pauseVideo()}catch(e){}", null)
     }
     fun seek(sec: Double) {
         pos = sec.coerceAtLeast(0.0)
         if (local) runCatching { mp?.seekTo((pos * 1000).toInt()) }
-        else webView?.evaluateJavascript("try{pl&&pl.seekTo($pos,true);pl.playVideo()}catch(e){}", null)
+        else webView?.evaluateJavascript("try{if(rdy&&pl){pl.seekTo($pos,true);pl.playVideo()}}catch(e){}", null)
     }
     fun setRate(v: Double) {
         speed = v
         runCatching { com.irth.mirath.store.Prefs.setSpeed(v.toFloat()) }
         if (local) runCatching { mp?.playbackParams = mp?.playbackParams?.setSpeed(v.toFloat())!! }
-        else webView?.evaluateJavascript("try{pl&&pl.setPlaybackRate($v)}catch(e){}", null)
+        else webView?.evaluateJavascript("try{rdy&&pl&&pl.setPlaybackRate($v)}catch(e){}", null)
     }
     fun pauseAll() {
         pausedAtMs = System.currentTimeMillis()
         runCatching { mp?.pause() }
-        webView?.evaluateJavascript("try{pl&&pl.pauseVideo()}catch(e){}", null)
+        webView?.evaluateJavascript("try{rdy&&pl&&pl.pauseVideo()}catch(e){}", null)
     }
     fun stopAll() {
         saveProgress()
         sleepAt = 0L; sleepEnd = false; pausedAtMs = 0L
         runCatching { mp?.stop(); mp?.release() }
         mp = null
-        webView?.evaluateJavascript("try{pl&&pl.stopVideo()}catch(e){}", null)
+        webView?.evaluateJavascript("try{rdy&&pl&&pl.stopVideo()}catch(e){}", null)
         videoId = null; playing = false; pos = 0.0
         ctxRef?.let { it.stopService(Intent(it, PlayerService::class.java)) }
     }
@@ -121,7 +166,7 @@ setInterval(function(){try{if(pl&&pl.getCurrentTime)window.ct=pl.getCurrentTime(
     fun play(ctx: Context, id: String, name: String, ytId: String, media: File?, startSec: Int, ended: () -> Unit) {
         ctxRef = ctx.applicationContext
         runCatching { com.irth.mirath.store.Prefs.touchActivity() }
-        if (videoId == id) { // نفس الدرس — أعد ربط المستمعين فقط، أو اقفز للموضع المطلوب إن تغيّر
+        if (videoId == id && (media != null || ytId.isNotEmpty())) { // نفس الدرس — أعد ربط المستمعين فقط، أو اقفز للموضع المطلوب إن تغيّر
             onEnded = ended
             if (startSec > 0 && kotlin.math.abs(pos - startSec) > 3.0) seek(startSec.toDouble())
             return
@@ -138,7 +183,7 @@ setInterval(function(){try{if(pl&&pl.getCurrentTime)window.ct=pl.getCurrentTime(
         val svc = Intent(ctx, PlayerService::class.java)
         if (media != null) {
             // مسار محلي: أوقف يوتيوب، شغّل MediaPlayer
-            webView?.evaluateJavascript("try{pl&&pl.stopVideo()}catch(e){}", null)
+            webView?.evaluateJavascript("try{rdy&&pl&&pl.stopVideo()}catch(e){}", null)
             local = true
             runCatching { mp?.release() }
             mp = MediaPlayer().apply {
@@ -156,9 +201,22 @@ setInterval(function(){try{if(pl&&pl.getCurrentTime)window.ct=pl.getCurrentTime(
         } else {
             runCatching { mp?.pause() }
             local = false
-            ensureWeb(ctx)
-            // pl قد لا يكون جاهزاً بعد — __pend يلتقطه onReady داخل الصفحة
-            webView?.evaluateJavascript("try{pl&&pl.loadVideoById?loadVid('$ytId',$startSec):(window.__pend={id:'$ytId',st:$startSec})}catch(e){window.__pend={id:'$ytId',st:$startSec}}", null)
+            val wv = ensureWeb(ctx)
+            if (ytId.isNotEmpty()) {
+                wv.evaluateJavascript("window.loadVid('$ytId',$startSec)", null)
+            } else if (id.startsWith("H:") && id.contains(":")) {
+                val sid = id.substringBeforeLast(":")
+                com.irth.mirath.data.Haw.bg.launch(kotlinx.coroutines.Dispatchers.IO) {
+                    com.irth.mirath.data.Haw.ensure(sid)
+                    val fresh = com.irth.mirath.data.Repo.video(id)
+                    if (fresh != null && fresh.yt.isNotEmpty() && videoId == id) {
+                        handler.post {
+                            title = fresh.title
+                            wv.evaluateJavascript("window.loadVid('${fresh.yt}',$startSec)", null)
+                        }
+                    }
+                }
+            }
         }
         if (speed != 1.0) { val r = speed; handler.postDelayed({ setRate(r) }, 900) }
         runCatching { ctx.startForegroundService(svc) }
@@ -226,7 +284,7 @@ setInterval(function(){try{if(pl&&pl.getCurrentTime)window.ct=pl.getCurrentTime(
         val ser = com.irth.mirath.data.Repo.seriesOfVideo(id)
         val media = com.irth.mirath.data.LocalLib.mediaFor(id)
             ?.takeIf { v.yt.isEmpty() || com.irth.mirath.store.Prefs.src(ser?.id ?: "") == "local" }
-        if (media == null && v.yt.isEmpty()) return false
+        if (media == null && v.yt.isEmpty() && !id.startsWith("H:")) return false
         val P = com.irth.mirath.store.Prefs
         val start = if (P.finished(id, v.duration)) 0 else P.progress(id)
         play(ctx, id, v.title, v.yt, media, start) {}
