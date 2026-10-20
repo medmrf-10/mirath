@@ -6,7 +6,10 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -23,7 +26,13 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -114,10 +123,7 @@ fun RowCard(
         Modifier
             .fillMaxWidth()
             .graphicsLayer { alpha = a; translationY = y }
-            .clip(RoundedCornerShape(16.dp))
-            .background(p.card)
-            .border(1.dp, p.line, RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
+            .appCard(p, onClick)
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -126,6 +132,7 @@ fun RowCard(
             Text(title, color = p.text, style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.alpha(if (dim) 0.55f else 1f))
             if (subtitle.isNotEmpty()) Text(subtitle, color = p.muted, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.alpha(if (dim) 0.5f else 1f))
             if (meta.isNotEmpty()) Text(meta, color = p.gold, style = MaterialTheme.typography.labelMedium, modifier = Modifier.alpha(if (dim) 0.45f else 1f))
+            if (bar > 0f) ThinBar(p, bar, Modifier.padding(top = 8.dp))
         }
         if (tag.isNotEmpty()) {
             Text(tag, color = p.gold, fontSize = 11.sp, modifier = Modifier
@@ -135,15 +142,7 @@ fun RowCard(
         }
         if (trailing != null) trailing() else Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, null, tint = p.muted)
     }
-    if (bar > 0f) {
-        Box(
-            Modifier.fillMaxWidth().padding(top = 6.dp).height(3.dp)
-                .clip(RoundedCornerShape(3.dp)).background(p.soft),
-        ) {
-            Box(Modifier.fillMaxWidth(bar.coerceIn(0f, 1f)).fillMaxHeight().clip(RoundedCornerShape(3.dp)).background(p.gold))
-        }
-        Spacer(Modifier.height(4.dp))
-    } else Spacer(Modifier.height(10.dp))
+    Spacer(Modifier.height(10.dp))
 }
 
 @Composable
@@ -153,9 +152,86 @@ fun SectionTitle(p: Pal, text: String) {
 
 @Composable
 fun EmptyBox(p: Pal, text: String) {
-    Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) {
-        Text(text, color = p.muted, style = MaterialTheme.typography.bodyLarge)
+    Column(Modifier.fillMaxWidth().padding(horizontal = 36.dp, vertical = 36.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Icon(Icons.Filled.Inbox, null, tint = p.muted.copy(alpha = 0.7f), modifier = Modifier.size(34.dp))
+        Spacer(Modifier.height(10.dp))
+        Text(text, color = p.muted, style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center)
     }
+}
+
+/** حالة فارغة بأيقونة وعنوان وشرح وزر إجراء اختياري. */
+@Composable
+fun EmptyState(p: Pal, icon: ImageVector, title: String, sub: String = "", actionLabel: String = "", onAction: (() -> Unit)? = null) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 36.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.size(76.dp).clip(CircleShape).background(p.soft), contentAlignment = Alignment.Center) {
+            Icon(icon, null, tint = p.gold, modifier = Modifier.size(36.dp))
+        }
+        Spacer(Modifier.height(16.dp))
+        Text(title, color = p.text, style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
+        if (sub.isNotEmpty()) {
+            Spacer(Modifier.height(4.dp))
+            Text(sub, color = p.muted, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
+        }
+        if (actionLabel.isNotEmpty() && onAction != null) {
+            Spacer(Modifier.height(18.dp))
+            Button(
+                onClick = onAction, shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = p.gold, contentColor = p.bg),
+            ) { Text(actionLabel, fontWeight = FontWeight.Bold) }
+        }
+    }
+}
+
+// ───────────────────────── نظام التصميم المشترك ─────────────────────────
+
+/** بطاقة بعمق خفيف (تدرّج + حدّ) وتأثير ضغط مرن؛ onClick اختياري. */
+@Composable
+fun Modifier.appCard(p: Pal, onClick: (() -> Unit)? = null, shape: Shape = RoundedCornerShape(18.dp), highlight: Boolean = false): Modifier {
+    val src = remember { MutableInteractionSource() }
+    val pressed by src.collectIsPressedAsState()
+    val sc by animateFloatAsState(if (pressed && onClick != null) 0.975f else 1f, tween(110), label = "press")
+    return this
+        .graphicsLayer { scaleX = sc; scaleY = sc }
+        .clip(shape)
+        .background(Brush.verticalGradient(listOf(lerp(p.card, p.text, 0.055f), p.card)))
+        .border(1.dp, if (highlight) p.gold else p.line, shape)
+        .then(if (onClick != null) Modifier.clickable(interactionSource = src, indication = LocalIndication.current, onClick = onClick) else Modifier)
+}
+
+/** عنوان صفحة مدمج: عنوان كبير + سطر شرح، محاذى للبداية (يمين). */
+@Composable
+fun PageHeader(p: Pal, title: String, subtitle: String = "", modifier: Modifier = Modifier) {
+    Column(modifier.fillMaxWidth().padding(top = 14.dp, bottom = 10.dp)) {
+        Text(title, fontFamily = Amiri, fontWeight = FontWeight.Bold, fontSize = 30.sp, lineHeight = 40.sp, color = p.text)
+        if (subtitle.isNotEmpty()) Text(subtitle, color = p.muted, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+/** صورة مصغّرة لفيديو يوتيوب (16:9) مع خلفية بديلة. */
+@Composable
+fun Thumb(p: Pal, yt: String, modifier: Modifier = Modifier, label: String = "") {
+    Box(modifier.clip(RoundedCornerShape(12.dp)).background(p.soft), contentAlignment = Alignment.Center) {
+        if (label.isNotEmpty()) Text(label, color = p.gold, fontFamily = Amiri, fontWeight = FontWeight.Bold, fontSize = 22.sp)
+        if (yt.isNotEmpty()) coil.compose.AsyncImage(
+            model = "https://i.ytimg.com/vi/$yt/mqdefault.jpg", contentDescription = null,
+            contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
+
+/** شريط تقدم رفيع. */
+@Composable
+fun ThinBar(p: Pal, frac: Float, modifier: Modifier = Modifier) {
+    Box(modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(4.dp)).background(p.soft)) {
+        Box(Modifier.fillMaxWidth(frac.coerceIn(0f, 1f)).fillMaxHeight().clip(RoundedCornerShape(4.dp)).background(p.gold))
+    }
+}
+
+/** اهتزاز لمسي خفيف لتأكيد فعل (تحديد، حفظ، تبديل). */
+@Composable
+fun rememberHaptic(): (strong: Boolean) -> Unit {
+    val h = LocalHapticFeedback.current
+    return remember(h) { { strong -> h.performHapticFeedback(if (strong) HapticFeedbackType.LongPress else HapticFeedbackType.TextHandleMove) } }
 }
 
 @Composable

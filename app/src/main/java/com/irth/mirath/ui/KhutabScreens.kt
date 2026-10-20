@@ -371,8 +371,7 @@ private var mixTargets by mutableStateOf<List<MixBlock>>(emptyList())
 @Composable
 private fun ContinueCard(p: Pal, last: KItem, onKhutba: (String, Boolean) -> Unit) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(shape16).background(p.card).border(1.dp, p.line, shape16)
-            .clickable { onKhutba(last.id, false) }.padding(14.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp).appCard(p, { onKhutba(last.id, false) }, highlight = true).padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(Icons.Filled.AutoStories, null, tint = p.gold, modifier = Modifier.size(24.dp))
@@ -388,9 +387,8 @@ private fun ContinueCard(p: Pal, last: KItem, onKhutba: (String, Boolean) -> Uni
 private fun KhutbaCard(p: Pal, it: KItem, isLast: Boolean, onKhutba: (String, Boolean) -> Unit) {
     val sc = KStore.savedCount(it.id)
     Column(
-        Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(shape16).background(p.card)
-            .border(1.dp, if (isLast) p.gold else p.line, shape16)
-            .clickable { onKhutba(it.id, false) }.padding(14.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+            .appCard(p, { onKhutba(it.id, false) }, highlight = isLast).padding(14.dp),
     ) {
         Text(it.title, color = p.text, fontFamily = Amiri, fontWeight = FontWeight.Bold, fontSize = 18.sp, lineHeight = 28.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
         if (it.topic.isNotEmpty()) Text(it.topic, color = p.muted, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -547,7 +545,8 @@ private fun KhutbaReader(p: Pal, kk: Khutba, onlySaved: Boolean, onLesson: (Stri
     val anchors = built.second
     val hasTwoStages = anchors.any { it.part == 2 }
 
-    fun toggleSel(id: String) { if (id in selected) selected.remove(id) else selected.add(id) }
+    val haptic = rememberHaptic()
+    fun toggleSel(id: String) { haptic(selected.isEmpty()); if (id in selected) selected.remove(id) else selected.add(id) }
     fun expKeys() = expanded.split(",").filter { it.isNotEmpty() }
     fun toggleExp(key: String) {
         val l = expKeys().toMutableList()
@@ -642,6 +641,7 @@ private fun KhutbaReader(p: Pal, kk: Khutba, onlySaved: Boolean, onLesson: (Stri
                                 selected = b.id in selected, selecting = selected.isNotEmpty(),
                                 onToggleSave = {
                                     val now = KStore.toggleSave(SavedBlock(kk.id, b.id, b.h, b.t, kk.title, kk.author))
+                                    haptic(false)
                                     toast(ctx, if (now) "حُفظت الفقرة" else "أُزيل الحفظ")
                                 },
                                 onMix = { mixFor = listOf(MixBlock(kk.id, b.id, b.h, b.t, kk.title)) },

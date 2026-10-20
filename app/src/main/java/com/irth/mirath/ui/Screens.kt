@@ -10,10 +10,17 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Download
@@ -51,95 +58,124 @@ private fun progressBar(id: String, duration: Int): Float {
     return if (pv > 10 && duration > 0) (pv.toFloat() / duration).coerceAtMost(0.98f) else 0f
 }
 
+/** أطول بادئة كلمات مشتركة بين عناوين دروس سلسلة (كلمتان فأكثر) — لحذف تكرارها من كل صف. */
+private fun commonTitlePrefix(titles: List<String>): String {
+    if (titles.size < 3) return ""
+    val split = titles.map { it.trim().split(Regex("\\s+")) }
+    val n = split.minOf { it.size } - 1
+    var k = 0
+    while (k < n && split.all { it[k] == split[0][k] }) k++
+    return if (k >= 2) split[0].take(k).joinToString(" ") else ""
+}
+
+private fun shortTitle(title: String, prefix: String): String {
+    if (prefix.isEmpty() || !title.startsWith(prefix)) return title
+    val rem = title.removePrefix(prefix).trim().trimStart('-', '–', '—', ':', '،', ' ').trim()
+    return rem.ifEmpty { title }
+}
+
 @Composable
-fun HomeScreen(p: Pal, onScience: (String) -> Unit, onLesson: (String) -> Unit) {
+fun HomeScreen(p: Pal, onScience: (String) -> Unit, onLesson: (String) -> Unit, onSearch: () -> Unit = {}) {
     val srcRev = Prefs.srcRev.value
     val sciences = Repo.sciences
     if (sciences == null) { LoadingBox(p); return }
     val lastId = Prefs.last()
     val lastV = lastId?.let { Repo.video(it) }
-    val recent = Prefs.recent.value.mapNotNull { Repo.video(it) }.filter { Prefs.progress(it.id) > 10 }.take(4)
+    val showLast = lastV != null && Prefs.ongoing(lastV.id, lastV.duration)
+    val recent = Prefs.recent.value.mapNotNull { Repo.video(it) }
+        .filter { Prefs.progress(it.id) > 10 && it.id != lastV?.id }.take(8)
     val totalSeries = Repo.series?.size ?: 0
     val totalLessons = Repo.videos?.size ?: 0
-    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        item {
-            Column(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("العلماء والمشايخ", style = MaterialTheme.typography.displayLarge, color = p.text)
-                Text("${sciences.size} شيخاً · $totalSeries سلسلة · $totalLessons درساً", color = p.muted, style = MaterialTheme.typography.bodyMedium)
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(2), modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(bottom = 24.dp),
+    ) {
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            PageHeader(p, "العلماء والمشايخ", "${sciences.size} شيخاً · $totalSeries سلسلة · $totalLessons درساً")
+        }
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(p.soft)
+                    .clickable(onClick = onSearch).padding(horizontal = 14.dp, vertical = 13.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Search, null, tint = p.muted, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(10.dp))
+                Text("ابحث عن درس أو سلسلة أو شيخ، أو عبارة سمعتها…", color = p.muted, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-        if (lastV != null && Prefs.ongoing(lastV.id, lastV.duration)) {
-            item {
-                Row(
-                    Modifier.fillMaxWidth().padding(bottom = 14.dp)
-                        .clip(RoundedCornerShape(16.dp)).background(p.card).border(1.dp, p.gold, RoundedCornerShape(16.dp))
-                        .clickable { onLesson(lastV.id) }.padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Icons.Filled.PlayArrow, null, tint = p.gold, modifier = Modifier.size(30.dp))
-                    Spacer(Modifier.width(10.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text("أكمل المشاهدة", color = p.gold, style = MaterialTheme.typography.labelMedium)
-                        Text(lastV.title, color = p.text, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        val left = (lastV.duration - Prefs.progress(lastV.id)).coerceAtLeast(0)
-                        if (left > 0) Text("متبقٍ ${fmtDur(left)}", color = p.muted, style = MaterialTheme.typography.labelMedium)
-                    }
+        if (showLast && lastV != null) item(span = { GridItemSpan(maxLineSpan) }) {
+            val left = (lastV.duration - Prefs.progress(lastV.id)).coerceAtLeast(0)
+            Row(
+                Modifier.fillMaxWidth().appCard(p, { onLesson(lastV.id) }, highlight = true).padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Thumb(p, lastV.yt, Modifier.width(112.dp).aspectRatio(16f / 9f), label = if (lastV.yt.isEmpty()) "${lastV.title.firstOrNull() ?: ' '}" else "")
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("أكمل المشاهدة", color = p.gold, style = MaterialTheme.typography.labelMedium)
+                    Text(lastV.title, color = p.text, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.height(6.dp))
+                    ThinBar(p, progressBar(lastV.id, lastV.duration))
+                    if (left > 0) Text("متبقٍ ${fmtDur(left)}", color = p.muted, style = MaterialTheme.typography.labelMedium)
+                }
+                Spacer(Modifier.width(8.dp))
+                Box(Modifier.size(44.dp).clip(androidx.compose.foundation.shape.CircleShape).background(p.gold), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Filled.PlayArrow, "تشغيل", tint = p.bg, modifier = Modifier.size(26.dp))
                 }
             }
         }
-        if (recent.isNotEmpty()) {
-            item {
-                SectionTitle(p, "آخر ما شغّلت")
-                Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    recent.forEach { v ->
-                        Column(
-                            Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(p.card)
-                                .border(1.dp, p.line, RoundedCornerShape(14.dp))
-                                .clickable { onLesson(v.id) }.padding(8.dp),
-                        ) {
-                            Box(
-                                Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(10.dp)).background(p.soft),
-                                contentAlignment = Alignment.Center,
-                            ) { Text("${v.title.firstOrNull() ?: "؟"}", color = p.gold, fontWeight = FontWeight.Bold, fontSize = 22.sp) }
-                            Text(v.title, color = p.muted, fontSize = 11.5.sp, lineHeight = 15.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp).height(32.dp))
-                            Box(Modifier.fillMaxWidth().padding(top = 5.dp).height(3.dp).clip(RoundedCornerShape(3.dp)).background(p.soft)) {
-                                Box(Modifier.fillMaxWidth(progressBar(v.id, v.duration)).fillMaxHeight().clip(RoundedCornerShape(3.dp)).background(p.gold))
-                            }
+        if (recent.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
+            Column {
+                Text("آخر ما شغّلت", color = p.gold, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 6.dp, bottom = 8.dp))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    items(recent, key = { it.id }) { v ->
+                        Column(Modifier.width(150.dp).appCard(p, { onLesson(v.id) }).padding(8.dp)) {
+                            Thumb(p, v.yt, Modifier.fillMaxWidth().aspectRatio(16f / 9f), label = if (v.yt.isEmpty()) "${v.title.firstOrNull() ?: ' '}" else "")
+                            Text(
+                                v.title, color = p.text, fontSize = 12.sp, lineHeight = 17.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(top = 6.dp).height(34.dp),
+                            )
+                            ThinBar(p, progressBar(v.id, v.duration), Modifier.padding(top = 4.dp))
                         }
                     }
-                    repeat(4 - recent.size) { Spacer(Modifier.weight(1f)) }
                 }
             }
         }
-        item { SectionTitle(p, "المشايخ") }
-        itemsIndexed(sciences) { i, s ->
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            Text("المشايخ", color = p.gold, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 10.dp))
+        }
+        items(sciences, key = { it.id }) { s ->
             val scSeries = Repo.seriesOfScience(s.id)
             val sCount = if (s.seriesCount > 0) s.seriesCount else scSeries.size
             val lCount = if (s.lessonsCount > 0) s.lessonsCount else scSeries.sumOf { it.items.size }
             val aCount = if (s.alignedCount > 0) s.alignedCount else scSeries.sumOf { it.alignedCount }
-            val meta = buildString {
-                if (sCount > 0) append("$sCount سلسلة")
-                if (lCount > 0) {
-                    if (isNotEmpty()) append(" · ")
-                    append("$lCount درساً")
-                }
+            Column(
+                Modifier.fillMaxWidth().appCard(p, { onScience(s.id) }).padding(horizontal = 10.dp, vertical = 14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                val ph = Haw.photoOf(s.id)
+                if (ph != null) coil.compose.AsyncImage(
+                    model = ph, contentDescription = s.name,
+                    modifier = Modifier.size(72.dp).clip(androidx.compose.foundation.shape.CircleShape).background(p.soft),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                ) else PhIcon(p, s.name.firstOrNull()?.toString() ?: "م", size = 72)
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    s.name, color = p.text, fontFamily = com.irth.mirath.ui.theme.Amiri, fontWeight = FontWeight.Bold,
+                    fontSize = 17.sp, lineHeight = 25.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.height(50.dp),
+                )
+                Text(
+                    listOf(if (sCount > 0) "$sCount سلسلة" else "", if (lCount > 0) "$lCount درساً" else "").filter { it.isNotEmpty() }.joinToString(" · "),
+                    color = p.muted, fontSize = 12.sp, maxLines = 1,
+                )
+                if (aCount > 0) Text(
+                    "حيّ $aCount", color = p.gold, fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 6.dp).border(1.dp, p.gold, RoundedCornerShape(999.dp)).padding(horizontal = 8.dp, vertical = 2.dp),
+                )
             }
-            val tag = if (aCount > 0) "حيّ $aCount" else ""
-            RowCard(
-                p, i, s.name,
-                meta = meta,
-                tag = tag,
-                onClick = { onScience(s.id) },
-                leading = {
-                    val ph = Haw.photoOf(s.id)
-                    if (ph != null) coil.compose.AsyncImage(
-                        model = ph, contentDescription = s.name,
-                        modifier = Modifier.size(44.dp).clip(androidx.compose.foundation.shape.CircleShape),
-                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                    )
-                    else PhIcon(p, s.name.firstOrNull()?.toString() ?: "م")
-                },
-            )
         }
     }
 }
@@ -164,21 +200,25 @@ fun ScienceScreen(p: Pal, scienceId: String, onSeries: (String) -> Unit, onLesso
 
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         item {
-            Column(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Haw.photoOf(scienceId)?.let { ph ->
+            Row(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                val ph = Haw.photoOf(scienceId)
+                if (ph != null) {
                     coil.compose.AsyncImage(
                         model = ph, contentDescription = science?.name,
-                        modifier = Modifier.padding(bottom = 8.dp).size(88.dp).clip(androidx.compose.foundation.shape.CircleShape),
+                        modifier = Modifier.size(84.dp).clip(androidx.compose.foundation.shape.CircleShape).background(p.soft),
                         contentScale = androidx.compose.ui.layout.ContentScale.Crop,
                     )
+                    Spacer(Modifier.width(14.dp))
                 }
-                Text(science?.name ?: "", style = MaterialTheme.typography.displayLarge, color = p.text)
-                val totalL = allSeries.sumOf { if (it.lessonsCount > 0) it.lessonsCount else it.items.size }
-                val totalA = allSeries.sumOf { it.alignedCount }
-                Text(
-                    "${allSeries.size} سلسلة · $totalL درساً" + if (totalA > 0) " · $totalA محاذى حياً" else "",
-                    color = p.muted, fontSize = 13.sp,
-                )
+                Column(Modifier.weight(1f)) {
+                    Text(science?.name ?: "", fontFamily = com.irth.mirath.ui.theme.Amiri, fontWeight = FontWeight.Bold, fontSize = 28.sp, lineHeight = 38.sp, color = p.text)
+                    val totalL = allSeries.sumOf { if (it.lessonsCount > 0) it.lessonsCount else it.items.size }
+                    val totalA = allSeries.sumOf { it.alignedCount }
+                    Text(
+                        "${allSeries.size} سلسلة · $totalL درساً" + if (totalA > 0) " · $totalA محاذى حياً" else "",
+                        color = p.muted, fontSize = 13.sp,
+                    )
+                }
             }
         }
         if (categories.size > 1 || allSeries.any { it.alignedCount > 0 }) {
@@ -227,7 +267,7 @@ fun ScienceScreen(p: Pal, scienceId: String, onSeries: (String) -> Unit, onLesso
                 meta = listOf(pl3(n, "درس", "درسان", "دروس", "درساً"), durStr, s.kind).filter { it.isNotEmpty() }.joinToString(" · "),
                 tag = tag,
                 bar = if (wp in 1..99) wp / 100f else 0f,
-                leading = { PhIcon(p, s.title.firstOrNull()?.toString() ?: "س") },
+                leading = { PhIcon(p, "${i + 1}", done = wp == 100) },
                 onClick = { onSeries(s.id) },
             )
         }
@@ -295,17 +335,14 @@ fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit, onExam: (
     }
     val cont = s.items.firstOrNull { vid -> Repo.video(vid)?.let { Prefs.ongoing(vid, it.duration) } == true }
     val finN = s.items.count { vid -> Repo.video(vid)?.let { Prefs.finished(vid, it.duration) } == true }
+    val common = remember(seriesId, srcRev) { commonTitlePrefix(s.items.mapNotNull { Repo.video(it)?.title }) }
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         item {
-            Column(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(s.title, style = MaterialTheme.typography.displayLarge, color = p.text)
-                val alCount = s.items.count { Repo.video(it)?.has?.contains("align") == true }
-                Text(
-                    pl3(s.items.size, "درس", "درسان", "دروس", "درساً") +
-                        if (alCount > 0) " · $alCount محاذى حياً" else "",
-                    color = p.gold, style = MaterialTheme.typography.labelMedium,
-                )
-            }
+            val alCount = s.items.count { Repo.video(it)?.has?.contains("align") == true }
+            PageHeader(
+                p, s.title,
+                pl3(s.items.size, "درس", "درسان", "دروس", "درساً") + if (alCount > 0) " · $alCount محاذى حياً" else "",
+            )
         }
         if (finN > 0 && s.items.isNotEmpty()) {
             item {
@@ -319,17 +356,16 @@ fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit, onExam: (
         }
         item {
             Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedButton(
+                Button(
                     onClick = { s.items.firstOrNull()?.let { firstId -> onLesson(cont ?: firstId) } },
-                    modifier = Modifier.weight(1f).height(44.dp),
+                    modifier = Modifier.weight(1f).height(46.dp),
                     shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = p.gold),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, p.line),
+                    colors = ButtonDefaults.buttonColors(containerColor = p.gold, contentColor = p.bg),
                     enabled = s.items.isNotEmpty(),
                 ) {
-                    Icon(Icons.Filled.PlayArrow, null, tint = p.gold)
+                    Icon(Icons.Filled.PlayArrow, null)
                     Spacer(Modifier.width(6.dp))
-                    Text(if (cont != null) "أكمل من حيث توقفت" else "استمع من البداية")
+                    Text(if (cont != null) "أكمل من حيث توقفت" else "استمع من البداية", fontWeight = FontWeight.Bold)
                 }
                 if (hasMedia) {
                     Spacer(Modifier.width(8.dp))
@@ -421,7 +457,7 @@ fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit, onExam: (
                 if (Prefs.isFav(vid)) append(" · ♥")
             }
             RowCard(
-                p, i, v.title,
+                p, i, shortTitle(v.title, common),
                 meta = meta,
                 tag = if (hasAlign) "حيّ" else "",
                 dim = fin,
@@ -482,25 +518,28 @@ fun SeriesScreen(p: Pal, seriesId: String, onLesson: (String) -> Unit, onExam: (
 }
 
 @Composable
-fun FavScreen(p: Pal, onLesson: (String) -> Unit) {
+fun FavScreen(p: Pal, onLesson: (String) -> Unit, onBrowse: () -> Unit = {}) {
     val favs = Prefs.favs.value.mapNotNull { Repo.video(it) }
-    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
         item {
-            Column(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("المفضلة", style = MaterialTheme.typography.displayLarge, color = p.text)
-            }
+            PageHeader(p, "المفضلة", if (favs.isEmpty()) "" else pl3(favs.size, "درس واحد", "درسان", "دروس", "درساً") + " محفوظة للوصول السريع")
         }
-        if (favs.isEmpty()) item { EmptyBox(p, "لا مفضلات بعد — أضف دروساً بالقلب") }
-        itemsIndexed(favs) { i, v ->
+        if (favs.isEmpty()) item {
+            EmptyState(
+                p, Icons.Filled.FavoriteBorder, "لا مفضلات بعد",
+                "اضغط القلب بجانب أي درس ليظهر هنا للوصول السريع", "تصفّح المكتبة", onBrowse,
+            )
+        }
+        itemsIndexed(favs, key = { _, v -> v.id }) { i, v ->
             RowCard(
                 p, i, v.title, meta = fmtDur(v.duration),
                 tag = if (v.has.contains("align")) "حيّ" else "",
                 dim = Prefs.finished(v.id, v.duration),
                 bar = progressBar(v.id, v.duration).takeIf { Prefs.ongoing(v.id, v.duration) } ?: 0f,
-                leading = { PhIcon(p, v.title.firstOrNull()?.toString() ?: "د", done = Prefs.finished(v.id, v.duration)) },
+                leading = { Thumb(p, v.yt, Modifier.width(88.dp).aspectRatio(16f / 9f), label = if (v.yt.isEmpty()) "${v.title.firstOrNull() ?: ' '}" else "") },
                 trailing = {
                     IconButton(onClick = { Prefs.toggleFav(v.id) }) {
-                        Icon(Icons.Filled.Favorite, null, tint = p.gold)
+                        Icon(Icons.Filled.Favorite, "إزالة من المفضلة", tint = p.gold)
                     }
                 },
                 onClick = { onLesson(v.id) },
@@ -540,43 +579,59 @@ fun StatsScreen(p: Pal, onLesson: (String) -> Unit = {}) {
     val total = vids.size
     val aligned = vids.count { it.has.contains("align") }
     val totalDur = vids.sumOf { it.duration }
-    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
+    val pct = if (total > 0) fin * 100 / total else 0
+    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
+        item { PageHeader(p, "إحصائي", "تقدمك ومكتبتك في لمحة") }
         item {
-            Column(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("إحصائي", style = MaterialTheme.typography.displayLarge, color = p.text)
+            Column(Modifier.fillMaxWidth().appCard(p, highlight = fin > 0).padding(18.dp)) {
+                Text("تقدمك في المكتبة", color = p.gold, style = MaterialTheme.typography.labelMedium)
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text("$pct%", color = p.text, fontFamily = com.irth.mirath.ui.theme.Amiri, fontWeight = FontWeight.Bold, fontSize = 44.sp)
+                    Spacer(Modifier.width(10.dp))
+                    Text("أتممت $fin من $total درساً", color = p.muted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(bottom = 10.dp))
+                }
+                ThinBar(p, if (total > 0) fin.toFloat() / total else 0f)
             }
         }
+        item { Spacer(Modifier.height(12.dp)); StatPair(p, StatTileData("قيد المشاهدة", "$ong", Icons.Filled.PlayCircle), StatTileData("أتممتها", "$fin", Icons.Filled.CheckCircle)) }
+        item { Spacer(Modifier.height(12.dp)); StatPair(p, StatTileData("فتحتها", "$opened", Icons.Filled.Visibility), StatTileData("مفضلاتك", "$fav", Icons.Filled.Favorite)) }
+        item { Text("المكتبة", color = p.gold, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 18.dp, bottom = 8.dp)) }
+        item { StatPair(p, StatTileData("المشايخ", "${Repo.sciences?.size ?: 0}", Icons.Filled.Groups), StatTileData("السلاسل", "${Repo.series?.size ?: 0}", Icons.Filled.FormatListBulleted)) }
         item {
-            StatRow(p, "المشايخ", "${Repo.sciences?.size ?: 0}")
-            StatRow(p, "السلاسل", "${Repo.series?.size ?: 0}")
-            StatRow(p, "الدروس الكلية", "$total")
-            StatRow(p, "دروس المحاذاة الحية", "$aligned", if (total > 0) aligned.toFloat() / total else 0f)
-            if (totalDur > 0) StatRow(p, "مدة المكتبة", fmtDur(totalDur))
-            StatRow(p, "دروس فتحتها", "$opened", if (total > 0) opened.toFloat() / total else 0f)
-            StatRow(p, "قيد المشاهدة", "$ong", if (total > 0) ong.toFloat() / total else 0f)
-            StatRow(p, "دروس أتممتها", "$fin", if (total > 0) fin.toFloat() / total else 0f)
-            StatRow(p, "مفضلاتك", "$fav")
-            val bms = remember(Prefs.bmRev.value) {
-                Prefs.allBookmarks().entries
-                    .flatMap { (vid, l) -> l.map { vid to it } }
-                    .sortedByDescending { it.second.t }
+            Spacer(Modifier.height(12.dp))
+            StatPair(
+                p, StatTileData("الدروس", "$total", Icons.Filled.MenuBook),
+                StatTileData("مدة المكتبة", if (totalDur > 0) fmtDur(totalDur) else "—", Icons.Filled.Schedule),
+            )
+        }
+        item {
+            Spacer(Modifier.height(12.dp))
+            Column(Modifier.fillMaxWidth().appCard(p).padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("دروس المحاذاة الحيّة", color = p.muted, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                    Text("$aligned", color = p.gold, style = MaterialTheme.typography.titleLarge)
+                }
+                Spacer(Modifier.height(8.dp))
+                ThinBar(p, if (total > 0) aligned.toFloat() / total else 0f)
             }
-            if (bms.isNotEmpty()) {
-                StatRow(p, "علاماتك", "${bms.size}")
-                bms.forEach { (vid, b) ->
-                    val vv = Repo.video(vid)
-                    Row(
-                        Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(10.dp))
-                            .background(p.card).border(1.dp, p.line, RoundedCornerShape(10.dp))
-                            .clickable { onLesson(vid) }.padding(horizontal = 10.dp, vertical = 9.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(fmtDur(b.s), color = p.gold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.width(10.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(vv?.title ?: vid, color = p.text, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            if (b.n.isNotEmpty()) Text(b.n, color = p.muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
+        }
+        val bms = Prefs.allBookmarks().entries
+            .flatMap { (vid, l) -> l.map { vid to it } }
+            .sortedByDescending { it.second.t }
+        if (bms.isNotEmpty()) {
+            item { Text("علاماتك (${bms.size})", color = p.gold, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 18.dp, bottom = 8.dp)) }
+            items(bms.size) { idx ->
+                val (vid, b) = bms[idx]
+                val vv = Repo.video(vid)
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 4.dp).appCard(p, { onLesson(vid) }, RoundedCornerShape(12.dp)).padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(fmtDur(b.s), color = p.gold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(vv?.title ?: vid, color = p.text, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (b.n.isNotEmpty()) Text(b.n, color = p.muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
             }
@@ -584,21 +639,23 @@ fun StatsScreen(p: Pal, onLesson: (String) -> Unit = {}) {
     }
 }
 
+private data class StatTileData(val label: String, val value: String, val icon: androidx.compose.ui.graphics.vector.ImageVector)
+
 @Composable
-private fun StatRow(p: Pal, k: String, v: String, frac: Float = -1f) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 7.dp)) {
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(k, color = p.muted, style = MaterialTheme.typography.bodyLarge)
-            Text(v, color = p.gold, style = MaterialTheme.typography.titleMedium)
-        }
-        if (frac >= 0f) {
-            Box(Modifier.fillMaxWidth().padding(top = 6.dp).height(4.dp).clip(RoundedCornerShape(4.dp)).background(p.soft)) {
-                Box(Modifier.fillMaxWidth(frac.coerceIn(0f, 1f)).fillMaxHeight().clip(RoundedCornerShape(4.dp)).background(p.gold))
-            }
-        }
+private fun StatPair(p: Pal, a: StatTileData, b: StatTileData) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        StatTile(p, a, Modifier.weight(1f))
+        StatTile(p, b, Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun StatTile(p: Pal, d: StatTileData, modifier: Modifier) {
+    Column(modifier.appCard(p).padding(16.dp)) {
+        Icon(d.icon, null, tint = p.gold, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.height(10.dp))
+        Text(d.value, color = p.text, fontFamily = com.irth.mirath.ui.theme.Amiri, fontWeight = FontWeight.Bold, fontSize = 28.sp, lineHeight = 34.sp)
+        Text(d.label, color = p.muted, style = MaterialTheme.typography.bodyMedium)
     }
 }
 

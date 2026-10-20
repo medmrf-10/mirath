@@ -23,6 +23,11 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.AudioFile
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,6 +62,7 @@ fun LibraryScreen(p: Pal, onSeries: (String) -> Unit, onRoadmap: (String) -> Uni
     var createUrl by remember { mutableStateOf("") }
     var editId by remember { mutableStateOf<String?>(null) }
     var showRm by remember { mutableStateOf(false) }
+    var toolsOpen by rememberSaveable { mutableStateOf(false) }
     var signed by remember { mutableStateOf(Sync.signedIn()) }
     var authCode by remember { mutableStateOf<Sync.DeviceCode?>(null) }
     val local = remember(rev) { LocalLib.localSeries() }
@@ -92,16 +98,16 @@ fun LibraryScreen(p: Pal, onSeries: (String) -> Unit, onRoadmap: (String) -> Uni
     }
 
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-        item {
+        item(key = "head") {
+            PageHeader(p, "مكتبتي", "سلاسلك الخاصة وخرائط الطريق والنسخ الاحتياطي في مكان واحد")
             // بطاقة مستودع ytb الحي
             val scCount = Repo.sciences?.size ?: 0
             val srCount = Repo.series?.size ?: 0
             val vdCount = Repo.videos?.size ?: 0
             val alCount = Repo.videos?.count { it.has.contains("align") } ?: 0
             Row(
-                Modifier.fillMaxWidth().padding(top = 14.dp)
-                    .clip(RoundedCornerShape(14.dp)).background(p.card)
-                    .border(1.dp, p.line, RoundedCornerShape(14.dp))
+                Modifier.fillMaxWidth()
+                    .appCard(p, shape = RoundedCornerShape(16.dp))
                     .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -125,19 +131,86 @@ fun LibraryScreen(p: Pal, onSeries: (String) -> Unit, onRoadmap: (String) -> Uni
                 }
             }
 
-            // إنشاء سلسلة — الإجراء الرئيسي
             Button(
                 onClick = { createUrl = ""; showCreate = true },
-                modifier = Modifier.fillMaxWidth().padding(top = 12.dp).height(52.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp).height(50.dp),
                 shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = p.primary),
+                colors = ButtonDefaults.buttonColors(containerColor = p.gold, contentColor = p.bg),
             ) {
                 Icon(Icons.Filled.Add, null, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(8.dp))
                 Text("سلسلة جديدة — يدوياً أو من قائمة يوتيوب", fontSize = 15.sp)
             }
 
-            // خرائط الطريق — مسارات تعلم مرتبة عبر السلاسل
+        }
+        if (busy || msg != null) item(key = "feedback") {
+            Column(Modifier.fillMaxWidth().padding(top = 10.dp)) {
+                if (busy) LinearProgressIndicator(Modifier.fillMaxWidth(), color = p.gold, trackColor = p.soft)
+                msg?.let {
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 8.dp).clip(RoundedCornerShape(12.dp)).background(p.soft)
+                            .padding(start = 14.dp, end = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(it, color = p.gold, fontSize = 13.sp, modifier = Modifier.weight(1f).padding(vertical = 10.dp))
+                        IconButton(onClick = { msg = null }, modifier = Modifier.size(36.dp)) {
+                            Icon(Icons.Filled.Close, "إخفاء", tint = p.muted, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+            }
+        }
+        item(key = "mine-h") {
+            Row(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("سلاسلي", color = p.gold, style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
+                if (local.isNotEmpty()) Text("${local.size}", color = p.muted, fontSize = 12.sp)
+            }
+        }
+        if (local.isEmpty()) {
+            item(key = "mine-empty") {
+                EmptyState(
+                    p, Icons.Outlined.AudioFile, "لا سلاسل خاصة بعد",
+                    "كل سلاسل المشايخ في «المكتبة». أنشئ سلسلتك الخاصة من الزر أعلاه، واستورد ملفاتك الصوتية أو قائمة يوتيوب.",
+                )
+            }
+        }
+
+        local.groupBy { it.folder }.toSortedMap().forEach { (fold, list) ->
+            if (fold.isNotEmpty()) {
+                item(key = "fold:$fold") {
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Filled.Folder, null, tint = p.gold, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(fold.replace('/', '›'), color = p.gold, fontSize = 13.sp)
+                    }
+                }
+            }
+            items(list, key = { it.id }) { s ->
+                val hasMedia = LocalLib.seriesHasMedia(s.id, s.items)
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 5.dp)
+                        .appCard(p, { onSeries(s.id) }, RoundedCornerShape(14.dp)).padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.size(40.dp).clip(RoundedCornerShape(11.dp)).background(p.soft), contentAlignment = Alignment.Center) {
+                        Icon(seriesIconOf(s.icon.ifEmpty { "book" }), null, tint = p.gold, modifier = Modifier.size(18.dp))
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(s.title, color = p.text, style = MaterialTheme.typography.bodyMedium)
+                        Text("${s.items.size} درس" + if (hasMedia) " · وسائط منزّلة" else "", color = p.muted, fontSize = 12.sp)
+                    }
+                    IconButton(onClick = { editId = s.id }, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Filled.Edit, "تحرير", tint = p.muted, modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+        }
+        item(key = "roadmaps") {
+            Column(Modifier.fillMaxWidth()) {
             Text(
                 "خرائط الطريق",
                 color = p.gold, style = MaterialTheme.typography.labelMedium,
@@ -146,9 +219,8 @@ fun LibraryScreen(p: Pal, onSeries: (String) -> Unit, onRoadmap: (String) -> Uni
             rms.forEach { rm ->
                 val (rd, ra) = Roadmaps.totals(rm)
                 Row(
-                    Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(14.dp))
-                        .background(p.card).border(1.dp, p.line, RoundedCornerShape(14.dp))
-                        .clickable { onRoadmap(rm.id) }.padding(horizontal = 14.dp, vertical = 12.dp),
+                    Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                        .appCard(p, { onRoadmap(rm.id) }, RoundedCornerShape(14.dp)).padding(horizontal = 14.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(seriesIconOf(rm.icon), null, tint = p.gold, modifier = Modifier.size(22.dp))
@@ -171,6 +243,23 @@ fun LibraryScreen(p: Pal, onSeries: (String) -> Unit, onRoadmap: (String) -> Uni
                 Text("خريطة طريق جديدة — مسارك التعليمي بخطوات", fontSize = 14.sp)
             }
 
+            }
+        }
+        item(key = "tools") {
+            Column(Modifier.fillMaxWidth().padding(top = 18.dp)) {
+                Row(
+                    Modifier.fillMaxWidth().appCard(p, { toolsOpen = !toolsOpen }, RoundedCornerShape(14.dp)).padding(horizontal = 14.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.Tune, null, tint = p.gold)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text("الأدوات والمزامنة", color = p.text, style = MaterialTheme.typography.bodyLarge)
+                        Text("نسخ احتياطي · حساب GitHub · استيراد ملفات", color = p.muted, fontSize = 12.sp)
+                    }
+                    Icon(if (toolsOpen) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown, null, tint = p.muted)
+                }
+                if (toolsOpen) {
             Text(
                 "نسخة احتياطية — سلاسلك وملفاتك وتقدمك في ملف واحد",
                 color = p.gold, style = MaterialTheme.typography.labelMedium,
@@ -322,61 +411,12 @@ fun LibraryScreen(p: Pal, onSeries: (String) -> Unit, onRoadmap: (String) -> Uni
                     enabled = !busy && link.isNotBlank(),
                 ) { Text("أضف") }
             }
-            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 12.dp), color = p.gold, trackColor = p.soft)
-            msg?.let {
-                Text(it, color = p.gold, fontSize = 13.sp, modifier = Modifier.padding(top = 10.dp))
-            }
             val mb = LocalLib.totalBytes() / 1024f / 1024f
             Text(
                 "المخزّن محلياً: ${"%.1f".format(mb)} م.ب",
                 color = p.muted, fontSize = 12.sp,
                 modifier = Modifier.padding(top = 10.dp, bottom = 6.dp),
             )
-            HorizontalDivider(color = p.line, modifier = Modifier.padding(vertical = 8.dp))
-        }
-
-        if (local.isEmpty()) {
-            item {
-                Column(Modifier.fillMaxWidth().padding(vertical = 28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Outlined.AudioFile, null, tint = p.muted, modifier = Modifier.size(36.dp))
-                    Text("لا سلاسل محلية مخصّصة بعد — كل سلاسل المشايخ متاحة في «المكتبة»", color = p.muted, fontSize = 13.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp))
-                    Text("أو أنشئ سلسلتك الخاصة واستورد ملفاتك الصوتية من الأعلى", color = p.muted, fontSize = 12.sp, textAlign = TextAlign.Center)
-                }
-            }
-        }
-
-        local.groupBy { it.folder }.toSortedMap().forEach { (fold, list) ->
-            if (fold.isNotEmpty()) {
-                item(key = "fold:$fold") {
-                    Row(
-                        Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(Icons.Filled.Folder, null, tint = p.gold, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(fold.replace('/', '›'), color = p.gold, fontSize = 13.sp)
-                    }
-                }
-            }
-            items(list, key = { it.id }) { s ->
-                val hasMedia = LocalLib.seriesHasMedia(s.id, s.items)
-                Row(
-                    Modifier.fillMaxWidth().padding(vertical = 5.dp).clip(RoundedCornerShape(14.dp))
-                        .background(p.card).border(1.dp, p.line, RoundedCornerShape(14.dp))
-                        .clickable { onSeries(s.id) }.padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(Modifier.size(40.dp).clip(RoundedCornerShape(11.dp)).background(p.soft), contentAlignment = Alignment.Center) {
-                        Icon(seriesIconOf(s.icon.ifEmpty { "book" }), null, tint = p.gold, modifier = Modifier.size(18.dp))
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(s.title, color = p.text, style = MaterialTheme.typography.bodyMedium)
-                        Text("${s.items.size} درس" + if (hasMedia) " · وسائط منزّلة" else "", color = p.muted, fontSize = 12.sp)
-                    }
-                    IconButton(onClick = { editId = s.id }, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Filled.Edit, "تحرير", tint = p.muted, modifier = Modifier.size(16.dp))
-                    }
                 }
             }
         }

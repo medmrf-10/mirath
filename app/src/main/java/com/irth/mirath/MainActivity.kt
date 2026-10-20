@@ -124,10 +124,9 @@ fun MirathApp() {
                 topBar = {
                     if (!route.contains("LessonR")) {
                         val title = when {
-                            route.contains("SeriesR") -> Repo.seriesOf(backEntry?.arguments?.getString("id") ?: "")?.title ?: "ميراث"
-                            route.contains("ScienceR") -> Repo.sciences?.firstOrNull { it.id == (backEntry?.arguments?.getString("id") ?: "") }?.name ?: "ميراث"
-                            route.contains("Fav") -> "المفضلة"
-                            route.contains("Stats") -> "إحصائي"
+                            route.contains("SeriesR") -> Repo.seriesOf(backEntry?.arguments?.getString("id") ?: "")?.science
+                                ?.let { sid -> Repo.sciences?.firstOrNull { it.id == sid }?.name } ?: "السلسلة"
+                            route.contains("ScienceR") -> "المشايخ"
                             route.contains("Today") -> "خطب اليوم"
                             route.contains("KhutbaR") -> com.irth.mirath.data.Khutab.item(backEntry?.arguments?.getString("id") ?: "")?.title ?: "الخطبة"
                             route.contains("MixR") -> com.irth.mirath.store.KStore.mix(backEntry?.arguments?.getString("id") ?: "")?.title ?: "خطبة مخلوطة"
@@ -197,6 +196,7 @@ fun MirathApp() {
                             }
                         }
                         if (!route.contains("LessonR")) {
+                            HorizontalDivider(color = p.line.copy(alpha = 0.6f))
                             NavigationBar(containerColor = p.bg, contentColor = p.muted) {
                                 NavItem(p, route.contains("Today") || route.isEmpty() || route.contains("KhutbaR") || route.contains("MixR") || route.contains("FolderR"), "اليوم", Icons.Filled.DateRange) {
                                     if (booted) runCatching { nav.navigate(Today) { popUpTo(Today) { inclusive = true } } }
@@ -257,9 +257,9 @@ fun MirathApp() {
                             MixScreen(p, r.id, onKhutba = { nav.navigate(KhutbaR(it)) })
                         }
                         composable<Home> {
-                            HomeScreen(p, onScience = { nav.navigate(ScienceR(it)) }, onLesson = { nav.navigate(LessonR(it)) })
+                            HomeScreen(p, onScience = { nav.navigate(ScienceR(it)) }, onLesson = { nav.navigate(LessonR(it)) }, onSearch = { showSearch = true })
                         }
-                        composable<Fav> { FavScreen(p) { id -> nav.navigate(LessonR(id)) } }
+                        composable<Fav> { FavScreen(p, onLesson = { id -> nav.navigate(LessonR(id)) }, onBrowse = { nav.navigate(Home) { popUpTo(Today) } }) }
                         composable<Lib> { LibraryScreen(p, onSeries = { nav.navigate(SeriesR(it)) }, onRoadmap = { nav.navigate(RoadmapR(it)) }) }
                         composable<Stats> { StatsScreen(p, onLesson = { nav.navigate(LessonR(it)) }) }
                         composable<ScienceR> { e ->
