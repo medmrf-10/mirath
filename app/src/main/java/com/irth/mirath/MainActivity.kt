@@ -66,6 +66,9 @@ import kotlinx.serialization.Serializable
 @Serializable data class LessonR(val id: String, val at: Int = -1)
 @Serializable data class RoadmapR(val id: String)
 @Serializable data class ExamR(val seriesId: String)
+@Serializable data class KhutbaR(val id: String, val saved: Boolean = false)
+@Serializable data class FolderR(val id: String)
+@Serializable data class MixR(val id: String)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -74,6 +77,8 @@ class MainActivity : ComponentActivity() {
         Api.init(applicationContext)
         LocalLib.init(applicationContext)
         TextIndex.init(applicationContext)
+        com.irth.mirath.store.KStore.init()
+        com.irth.mirath.data.Khutab.init(applicationContext)
         enableEdgeToEdge()
         setContent { MirathApp() }
     }
@@ -123,14 +128,17 @@ fun MirathApp() {
                             route.contains("ScienceR") -> Repo.sciences?.firstOrNull { it.id == (backEntry?.arguments?.getString("id") ?: "") }?.name ?: "ميراث"
                             route.contains("Fav") -> "المفضلة"
                             route.contains("Stats") -> "إحصائي"
-                            route.contains("Today") -> "يومك"
+                            route.contains("Today") -> "خطب اليوم"
+                            route.contains("KhutbaR") -> com.irth.mirath.data.Khutab.item(backEntry?.arguments?.getString("id") ?: "")?.title ?: "الخطبة"
+                            route.contains("MixR") -> com.irth.mirath.store.KStore.mix(backEntry?.arguments?.getString("id") ?: "")?.title ?: "خطبة مخلوطة"
+                            route.contains("FolderR") -> com.irth.mirath.store.KStore.folder(backEntry?.arguments?.getString("id") ?: "")?.name ?: "مجلد"
                             else -> "ميراث"
                         }
                         TopGlassBar(
                             p, title,
                             onTheme = { showTheme = true },
                             onSearch = { showSearch = true },
-                            onBack = if (route.contains("ScienceR") || route.contains("SeriesR") || route.contains("RoadmapR") || route.contains("ExamR")) {
+                            onBack = if (route.contains("ScienceR") || route.contains("SeriesR") || route.contains("RoadmapR") || route.contains("ExamR") || route.contains("KhutbaR") || route.contains("MixR") || route.contains("FolderR")) {
                                 { nav.popBackStack() }
                             } else null,
                         )
@@ -190,7 +198,7 @@ fun MirathApp() {
                         }
                         if (!route.contains("LessonR")) {
                             NavigationBar(containerColor = p.bg, contentColor = p.muted) {
-                                NavItem(p, route.contains("Today") || route.isEmpty(), "اليوم", Icons.Filled.DateRange) {
+                                NavItem(p, route.contains("Today") || route.isEmpty() || route.contains("KhutbaR") || route.contains("MixR") || route.contains("FolderR"), "اليوم", Icons.Filled.DateRange) {
                                     if (booted) runCatching { nav.navigate(Today) { popUpTo(Today) { inclusive = true } } }
                                 }
                                 NavItem(p, route.contains("Home"), "المكتبة", Icons.Filled.Home) {
@@ -224,9 +232,29 @@ fun MirathApp() {
                         popExitTransition = { androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(160)) },
                     ) {
                         composable<Today> {
-                            TodayScreen(p, onLesson = { nav.navigate(LessonR(it)) }) {
-                                nav.navigate(Home) { popUpTo(Today) }
-                            }
+                            TodayScreen(
+                                p,
+                                onKhutba = { id, saved -> nav.navigate(KhutbaR(id, saved)) },
+                                onFolder = { nav.navigate(FolderR(it)) },
+                                onMix = { nav.navigate(MixR(it)) },
+                            )
+                        }
+                        composable<KhutbaR> { e ->
+                            val r = e.toRoute<KhutbaR>()
+                            KhutbaScreen(
+                                p, r.id, r.saved,
+                                onLesson = { nav.navigate(LessonR(it)) },
+                                // السابقة/التالية تستبدل الصفحة الحالية بدل تكديس الصفحات
+                                onKhutba = { nid -> nav.navigate(KhutbaR(nid)) { popUpTo<KhutbaR> { inclusive = true } } },
+                            )
+                        }
+                        composable<FolderR> { e ->
+                            val r = e.toRoute<FolderR>()
+                            FolderScreen(p, r.id, onFolder = { nav.navigate(FolderR(it)) }, onMix = { nav.navigate(MixR(it)) })
+                        }
+                        composable<MixR> { e ->
+                            val r = e.toRoute<MixR>()
+                            MixScreen(p, r.id, onKhutba = { nav.navigate(KhutbaR(it)) })
                         }
                         composable<Home> {
                             HomeScreen(p, onScience = { nav.navigate(ScienceR(it)) }, onLesson = { nav.navigate(LessonR(it)) })

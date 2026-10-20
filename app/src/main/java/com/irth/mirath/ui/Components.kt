@@ -52,8 +52,10 @@ fun TopGlassBar(p: Pal, title: String, onTheme: () -> Unit, onSearch: () -> Unit
                 title,
                 fontFamily = Amiri,
                 fontWeight = FontWeight.Bold,
-                fontSize = 25.sp,
+                fontSize = if (title.length > 26) 17.sp else if (title.length > 14) 21.sp else 25.sp,
                 color = p.primary,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
             IconButton(onClick = onSearch) { Icon(Icons.Filled.Search, "بحث", tint = p.muted) }

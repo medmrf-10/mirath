@@ -213,5 +213,6 @@ object Prefs {
         recent.value = (sp?.getString("recent", "") ?: "").split(",").filter { it.isNotBlank() }
         streak.value = sp?.getInt("streak", 0) ?: 0
         bmRev.value++; srcRev.value++
+        KStore.reload()
     }
 }

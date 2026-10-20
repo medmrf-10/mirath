@@ -1,0 +1,57 @@
+{
+ "v": 2,
+ "authors": [
+  {
+   "id": "omar",
+   "name": "الحبيب عمر بن حفيظ",
+   "count": 1
+  },
+  {
+   "id": "sariri",
+   "name": "الشيخ مولود السريري",
+   "count": 1
+  }
+ ],
+ "items": [
+  {
+   "id": "omar-011",
+   "author": "omar",
+   "n": 11,
+   "title": "المؤثرات في استقامة الفكر (خطبة جامع الصالح)",
+   "topic": "ذكرى المولد النبوي وأثر الصحبة والمسموعات في الفكر",
+   "yt": "0zTMGF4pE5I",
+   "src": "H:habib-omar-ibn-hafiz/khutab_jumaa:11",
+   "dur": 1677,
+   "blocks": 14,
+   "chars": 8731,
+   "has": [
+    "intro1",
+    "dua1",
+    "close1",
+    "intro2",
+    "dua2",
+    "close2"
+   ],
+   "file": "omar/omar-011.json"
+  },
+  {
+   "id": "sariri-002",
+   "author": "sariri",
+   "n": 2,
+   "title": "الحب في الله ومكانته في الإسلام",
+   "topic": "المحبة في الله والبغض في الله: حلاوة الإيمان، وعلامات المحبة، والصديق الحقيقي",
+   "yt": "fwc_masHxbM",
+   "src": "H:mouloud-sariri/s043:2",
+   "dur": 1457,
+   "blocks": 15,
+   "chars": 8698,
+   "has": [
+    "intro1",
+    "close1",
+    "intro2",
+    "dua2"
+   ],
+   "file": "sariri/sariri-002.json"
+  }
+ ]
+}
