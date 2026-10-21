@@ -82,6 +82,7 @@ object Khutab {
         KAuthor("omar", "الحبيب عمر بن حفيظ"),
         KAuthor("sariri", "مولود السريري"),
         KAuthor("sayed", "الشيخ أحمد السيد"),
+        KAuthor("jifri", "الحبيب علي الجفري"),
         KAuthor("bouti", "محمد سعيد رمضان البوطي"),
     )
 
