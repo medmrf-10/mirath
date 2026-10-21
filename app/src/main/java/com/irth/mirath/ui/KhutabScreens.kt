@@ -261,7 +261,7 @@ private fun folderPath(id: String): String {
 
 // ───────────────────────── صفحة «اليوم» ─────────────────────────
 
-private val AUTHOR_FILTERS = listOf("" to "الكل", "omar" to "الحبيب عمر", "sariri" to "السريري")
+private val AUTHOR_FILTERS = listOf("" to "الكل", "omar" to "الحبيب عمر", "sariri" to "السريري", "bouti" to "البوطي", "sayed" to "أحمد السيد")
 
 /** الصفحة الرئيسية: ثلاثة أقسام واضحة (الخطب | محفوظاتي | مجلداتي) بمفتاح ثابت أعلى الصفحة. */
 @OptIn(ExperimentalFoundationApi::class)
@@ -394,7 +394,7 @@ private fun KhutbaCard(p: Pal, it: KItem, isLast: Boolean, onKhutba: (String, Bo
         if (it.topic.isNotEmpty()) Text(it.topic, color = p.muted, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            val who = if (it.author == "omar") "الحبيب عمر" else if (it.author == "sariri") "السريري" else ""
+            val who = if (it.author == "omar") "الحبيب عمر" else if (it.author == "sariri") "السريري" else if (it.author == "bouti") "البوطي" else if (it.author == "sayed") "أحمد السيد" else ""
             Text(
                 listOfNotNull(who.takeIf { w -> w.isNotEmpty() }, "${it.blocks} فقرة", fmtDur(it.dur).takeIf { _ -> it.dur > 0 }).joinToString(" · "),
                 color = p.gold, fontSize = 12.sp, modifier = Modifier.weight(1f),

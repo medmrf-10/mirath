@@ -81,6 +81,8 @@ object Khutab {
     private val defaultAuthors = listOf(
         KAuthor("omar", "الحبيب عمر بن حفيظ"),
         KAuthor("sariri", "مولود السريري"),
+        KAuthor("sayed", "الشيخ أحمد السيد"),
+        KAuthor("bouti", "محمد سعيد رمضان البوطي"),
     )
 
     private var app: Context? = null
