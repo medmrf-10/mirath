@@ -7,3 +7,8 @@ local.properties
 *.apk
 *.idsig
 .kotlin/
+.DS_Store
+__pycache__/
+*.pyc
+*.log
+*.jks
